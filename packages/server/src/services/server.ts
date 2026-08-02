@@ -1,15 +1,35 @@
 import { db } from "@dokploy/server/db";
 import {
 	type apiCreateServer,
+	applications,
+	compose,
 	member,
 	organization,
+	type ServerMetricsConfig,
 	server,
 } from "@dokploy/server/db/schema";
 import { TRPCError } from "@trpc/server";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { z } from "zod";
 
 export type Server = typeof server.$inferSelect;
+
+const defaultServerMetricsConfig: ServerMetricsConfig = {
+	server: {
+		type: "Remote",
+		refreshRate: 60,
+		port: 4500,
+		token: "",
+		urlCallback: "",
+		cronJob: "",
+		retentionDays: 2,
+		thresholds: { cpu: 0, memory: 0 },
+	},
+	containers: {
+		refreshRate: 60,
+		services: { include: [], exclude: [] },
+	},
+};
 
 export const createServer = async (
 	input: z.infer<typeof apiCreateServer>,
@@ -21,6 +41,7 @@ export const createServer = async (
 			...input,
 			organizationId: organizationId,
 			createdAt: new Date().toISOString(),
+			metricsConfig: defaultServerMetricsConfig,
 		} as typeof server.$inferInsert)
 		.returning()
 		.then((value) => value[0]);
@@ -37,7 +58,7 @@ export const createServer = async (
 
 export const findServerById = async (serverId: string) => {
 	const currentServer = await db.query.server.findFirst({
-		where: eq(server.serverId, serverId),
+		where: and(eq(server.serverId, serverId), isNull(server.deletedAt)),
 		with: {
 			deployments: true,
 			sshKey: true,
@@ -77,7 +98,7 @@ export const findServersByUserId = async (userId: string) => {
 	const orgs = await db.query.organization.findMany({
 		where: eq(organization.ownerId, userId),
 		with: {
-			servers: true,
+			servers: { where: isNull(server.deletedAt) },
 		},
 	});
 
@@ -88,8 +109,9 @@ export const findServersByUserId = async (userId: string) => {
 
 export const deleteServer = async (serverId: string) => {
 	const currentServer = await db
-		.delete(server)
-		.where(eq(server.serverId, serverId))
+		.update(server)
+		.set({ deletedAt: new Date(), serverStatus: "inactive" })
+		.where(and(eq(server.serverId, serverId), isNull(server.deletedAt)))
 		.returning()
 		.then((value) => value[0]);
 
@@ -98,11 +120,17 @@ export const deleteServer = async (serverId: string) => {
 
 export const haveActiveServices = async (serverId: string) => {
 	const currentServer = await db.query.server.findFirst({
-		where: eq(server.serverId, serverId),
+		where: and(eq(server.serverId, serverId), isNull(server.deletedAt)),
 		columns: { serverId: true },
 		with: {
-			applications: { columns: { applicationId: true } },
-			compose: { columns: { composeId: true } },
+			applications: {
+				where: isNull(applications.deletedAt),
+				columns: { applicationId: true },
+			},
+			compose: {
+				where: isNull(compose.deletedAt),
+				columns: { composeId: true },
+			},
 			libsql: { columns: { libsqlId: true } },
 			mariadb: { columns: { mariadbId: true } },
 			mongo: { columns: { mongoId: true } },
@@ -142,7 +170,7 @@ export const updateServerById = async (
 		.set({
 			...serverData,
 		})
-		.where(eq(server.serverId, serverId))
+		.where(and(eq(server.serverId, serverId), isNull(server.deletedAt)))
 		.returning()
 		.then((res) => res[0]);
 
@@ -150,7 +178,9 @@ export const updateServerById = async (
 };
 
 export const getAllServers = async () => {
-	const servers = await db.query.server.findMany();
+	const servers = await db.query.server.findMany({
+		where: isNull(server.deletedAt),
+	});
 	return servers;
 };
 
@@ -161,7 +191,10 @@ export const getAccessibleServerIds = async (session: {
 	const { userId, activeOrganizationId } = session;
 
 	const allOrgServers = await db.query.server.findMany({
-		where: eq(server.organizationId, activeOrganizationId),
+		where: and(
+			eq(server.organizationId, activeOrganizationId),
+			isNull(server.deletedAt),
+		),
 		columns: {
 			serverId: true,
 		},

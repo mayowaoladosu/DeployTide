@@ -79,6 +79,63 @@ jobs:
       - name: Run unit tests
         run: pnpm --filter=deploytide test
 
+  phase2-database:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: deploytide
+          POSTGRES_PASSWORD: deploytide-test
+          POSTGRES_DB: deploytide
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U deploytide -d deploytide"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    env:
+      DATABASE_URL: postgresql://deploytide:deploytide-test@localhost:5432/deploytide
+      PHASE2_INTEGRATION_DATABASE_URL: postgresql://deploytide:deploytide-test@localhost:5432/deploytide
+      BETTER_AUTH_SECRET: phase2-ci-auth-secret-not-used-in-production
+      ENCRYPTION_KEY: phase2-ci-independent-encryption-key
+      ENCRYPTION_KEY_ID: phase2-ci
+      DEPLOYTIDE_SECRET_DIGEST_KEY: phase2-ci-stable-secret-digest-key
+      DEPLOYTIDE_LEGACY_DECRYPTION: enabled
+      BETTER_AUTH_URL: http://localhost:3000
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.4.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify schema migration parity
+        run: |
+          pnpm --filter=deploytide migration:generate
+          git diff --exit-code -- apps/dokploy/drizzle
+
+      - name: Apply migrations twice
+        run: |
+          pnpm --filter=deploytide migration:run
+          pnpm --filter=deploytide migration:run
+
+      - name: Verify migration cutback and parity
+        run: pnpm --filter=deploytide phase2:migrations
+
+      - name: Verify canonical database invariants
+        run: pnpm --filter=deploytide test:phase2-db
+
   build:
     runs-on: ubuntu-latest
     env:

@@ -2,12 +2,16 @@ import type http from "node:http";
 import {
 	docker,
 	execAsync,
+	findWorkspaceServiceRuntime,
 	getHostSystemStats,
 	getLastAdvancedStatsFile,
 	IS_CLOUD,
 	recordAdvancedStats,
 	validateRequest,
 } from "@dokploy/server";
+import { db } from "@dokploy/server/db";
+import { compose } from "@dokploy/server/db/schema";
+import { eq } from "drizzle-orm";
 import { WebSocketServer } from "ws";
 import { canAccessDockerOverWss } from "./authorize";
 
@@ -40,20 +44,20 @@ export const setupDockerStatsMonitoringSocketServer = (
 			ws.close();
 			return;
 		}
-		const appName = url.searchParams.get("appName");
-		const appType = (url.searchParams.get("appType") || "application") as
+		const requestedAppName = url.searchParams.get("appName");
+		let appType = (url.searchParams.get("appType") || "application") as
 			| "application"
 			| "stack"
 			| "docker-compose";
 		const serviceId = url.searchParams.get("serviceId");
 		const { user, session } = await validateRequest(req);
 
-		if (!appName) {
+		if (!requestedAppName && !serviceId) {
 			ws.close(4000, "appName no provided");
 			return;
 		}
 
-		if (!user || !session) {
+		if (!user || !session?.activeOrganizationId) {
 			ws.close();
 			return;
 		}
@@ -61,6 +65,32 @@ export const setupDockerStatsMonitoringSocketServer = (
 		if (!(await canAccessDockerOverWss(user, session, null, serviceId))) {
 			ws.close(4003, "Not authorized");
 			return;
+		}
+
+		let appName = requestedAppName ?? "";
+		if (serviceId) {
+			const runtime = await findWorkspaceServiceRuntime(
+				session.activeOrganizationId,
+				serviceId,
+			);
+			if (runtime.serverId) {
+				ws.close(4003, "Remote service stats are not available on this socket");
+				return;
+			}
+			appName = runtime.appName;
+			if (runtime.type === "compose") {
+				const scopedCompose = await db.query.compose.findFirst({
+					where: eq(compose.composeId, runtime.serviceId),
+					columns: { composeType: true },
+				});
+				if (!scopedCompose) {
+					ws.close(4003, "Service not found");
+					return;
+				}
+				appType = scopedCompose.composeType;
+			} else {
+				appType = "application";
+			}
 		}
 		const intervalId = setInterval(async () => {
 			try {

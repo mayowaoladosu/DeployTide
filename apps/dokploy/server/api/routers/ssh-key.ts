@@ -10,8 +10,7 @@ import { TRPCError } from "@trpc/server";
 import { desc, eq } from "drizzle-orm";
 import {
 	createTRPCRouter,
-	protectedProcedure,
-	withPermission,
+	operatorProcedure,
 } from "@/server/api/trpc";
 import { audit } from "@/server/api/utils/audit";
 import {
@@ -22,6 +21,9 @@ import {
 	apiUpdateSshKey,
 	sshKeys,
 } from "@/server/db/schema";
+
+const protectedProcedure = operatorProcedure;
+const withPermission = (_resource: string, _action: string) => operatorProcedure;
 
 export const sshRouter = createTRPCRouter({
 	create: withPermission("sshKeys", "create")

@@ -5,6 +5,10 @@ import { describe, expect, it } from "vitest";
 describe("createDomainLabels", () => {
 	const appName = "test-app";
 	const baseDomain: Domain = {
+		organizationId: null,
+		projectId: null,
+		environmentId: null,
+		deletedAt: null,
 		host: "example.com",
 		port: 8080,
 		customEntrypoint: null,

@@ -54,7 +54,7 @@ export default async function handler(
 	}
 
 	const expiresAt = Math.floor(Date.now() / 1000) + result.expires_in;
-	await updateGitlab(gitlab.gitlabId, {
+	await updateGitlab(gitlab.gitlabId, gitlab.gitProvider.organizationId, {
 		accessToken: result.access_token,
 		refreshToken: result.refresh_token,
 		expiresAt,

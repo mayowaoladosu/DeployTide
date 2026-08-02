@@ -21,7 +21,9 @@ import {
 	apiUpdateRegistry,
 	registry,
 } from "@/server/db/schema";
-import { createTRPCRouter, withPermission } from "../trpc";
+import { createTRPCRouter, operatorProcedure } from "../trpc";
+
+const withPermission = (_resource: string, _action: string) => operatorProcedure;
 export const registryRouter = createTRPCRouter({
 	create: withPermission("registry", "create")
 		.input(apiCreateRegistry)

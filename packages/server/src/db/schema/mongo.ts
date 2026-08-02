@@ -2,17 +2,21 @@ import { relations } from "drizzle-orm";
 import {
 	bigint,
 	boolean,
+	foreignKey,
 	integer,
 	json,
 	pgTable,
 	text,
+	uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { organization } from "./account";
 import { backups } from "./backups";
 import { environments } from "./environment";
 import { mounts } from "./mount";
+import { projects } from "./project";
 import { server } from "./server";
 import {
 	applicationStatus,
@@ -56,7 +60,7 @@ export const mongo = pgTable("mongo", {
 		.unique(),
 	description: text("description"),
 	databaseUser: text("databaseUser").notNull(),
-	databasePassword: text("databasePassword").notNull(),
+	databasePassword: encryptedText("databasePassword").notNull(),
 	dockerImage: text("dockerImage").notNull().default("mongo:8"),
 	command: text("command"),
 	args: text("args").array(),
@@ -85,6 +89,12 @@ export const mongo = pgTable("mongo", {
 		.notNull()
 		.$defaultFn(() => new Date().toISOString()),
 
+	organizationId: text("organizationId")
+		.notNull()
+		.references(() => organization.id, { onDelete: "cascade" }),
+	projectId: text("projectId")
+		.notNull()
+		.references(() => projects.projectId, { onDelete: "cascade" }),
 	environmentId: text("environmentId")
 		.notNull()
 		.references(() => environments.environmentId, { onDelete: "cascade" }),
@@ -96,9 +106,34 @@ export const mongo = pgTable("mongo", {
 	detachDokployNetwork: boolean("detachDokployNetwork")
 		.notNull()
 		.default(false),
-});
+}, (table) => [
+	uniqueIndex("mongo_id_organization_project_environment_unique").on(
+		table.mongoId,
+		table.organizationId,
+		table.projectId,
+		table.environmentId,
+	),
+	foreignKey({
+		name: "mongo_project_organization_fk",
+		columns: [table.projectId, table.organizationId],
+		foreignColumns: [projects.projectId, projects.organizationId],
+	}).onDelete("cascade"),
+	foreignKey({
+		name: "mongo_environment_project_organization_fk",
+		columns: [table.environmentId, table.projectId, table.organizationId],
+		foreignColumns: [environments.environmentId, environments.projectId, environments.organizationId],
+	}).onDelete("cascade"),
+]);
 
 export const mongoRelations = relations(mongo, ({ one, many }) => ({
+	organization: one(organization, {
+		fields: [mongo.organizationId],
+		references: [organization.id],
+	}),
+	project: one(projects, {
+		fields: [mongo.projectId],
+		references: [projects.projectId],
+	}),
 	environment: one(environments, {
 		fields: [mongo.environmentId],
 		references: [environments.environmentId],

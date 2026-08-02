@@ -75,7 +75,7 @@ export default async function handler(
 		: null;
 
 	try {
-		await updateGitea(gitea.giteaId, {
+		await updateGitea(gitea.giteaId, gitea.gitProvider.organizationId, {
 			accessToken: result.access_token,
 			refreshToken: result.refresh_token,
 			expiresAt,

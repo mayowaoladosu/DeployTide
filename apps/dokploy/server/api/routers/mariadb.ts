@@ -17,6 +17,7 @@ import {
 	rebuildDatabase,
 	removeMariadbById,
 	removeService,
+	resolveEnvironmentOwnership,
 	startService,
 	startServiceRemote,
 	stopService,
@@ -459,15 +460,27 @@ export const mariadbRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.mariadbId, {
 				service: ["create"],
 			});
-
-			const updatedMariadb = await db
-				.update(mariadbTable)
-				.set({
-					environmentId: input.targetEnvironmentId,
-				})
-				.where(eq(mariadbTable.mariadbId, input.mariadbId))
-				.returning()
-				.then((res) => res[0]);
+			const updatedMariadb = await db.transaction(async (transaction) => {
+				const ownership = await resolveEnvironmentOwnership(
+					transaction,
+					input.targetEnvironmentId,
+					ctx.session.activeOrganizationId,
+				);
+				return transaction
+					.update(mariadbTable)
+					.set(ownership)
+					.where(
+						and(
+							eq(mariadbTable.mariadbId, input.mariadbId),
+							eq(
+								mariadbTable.organizationId,
+								ctx.session.activeOrganizationId,
+							),
+						),
+					)
+					.returning()
+					.then((res) => res[0]);
+			});
 
 			if (!updatedMariadb) {
 				throw new TRPCError({

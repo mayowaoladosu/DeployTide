@@ -41,7 +41,12 @@ export const bitbucketRouter = createTRPCRouter({
 					resourceName: input.name,
 				});
 
-				return result;
+				const {
+					appPassword: _appPassword,
+					apiToken: _apiToken,
+					...safeResult
+				} = result;
+				return safeResult;
 			} catch (error) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
@@ -55,7 +60,12 @@ export const bitbucketRouter = createTRPCRouter({
 		.query(async ({ input, ctx }) => {
 			const bitbucket = await findBitbucketById(input.bitbucketId);
 			await assertGitProviderAccess(ctx.session, bitbucket.gitProvider);
-			return bitbucket;
+			const {
+				appPassword: _appPassword,
+				apiToken: _apiToken,
+				...safeBitbucket
+			} = bitbucket;
+			return safeBitbucket;
 		}),
 	bitbucketProviders: protectedProcedure.query(async ({ ctx }) => {
 		const accessibleIds = await getAccessibleGitProviderIds(ctx.session);
@@ -114,10 +124,13 @@ export const bitbucketRouter = createTRPCRouter({
 	update: withPermission("gitProviders", "create")
 		.input(apiUpdateBitbucket)
 		.mutation(async ({ input, ctx }) => {
-			const result = await updateBitbucket(input.bitbucketId, {
-				...input,
-				organizationId: ctx.session.activeOrganizationId,
-			});
+			const bitbucket = await findBitbucketById(input.bitbucketId);
+			await assertGitProviderAccess(ctx.session, bitbucket.gitProvider);
+			const result = await updateBitbucket(
+				input.bitbucketId,
+				ctx.session.activeOrganizationId,
+				input,
+			);
 
 			await audit(ctx, {
 				action: "update",
@@ -126,6 +139,11 @@ export const bitbucketRouter = createTRPCRouter({
 				resourceName: input.name,
 			});
 
-			return result;
+			const {
+				appPassword: _appPassword,
+				apiToken: _apiToken,
+				...safeResult
+			} = result;
+			return safeResult;
 		}),
 });

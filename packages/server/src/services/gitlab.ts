@@ -34,7 +34,7 @@ export const createGitlab = async (
 			});
 		}
 
-		await tx
+		const newGitlab = await tx
 			.insert(gitlab)
 			.values({
 				...input,
@@ -42,6 +42,13 @@ export const createGitlab = async (
 			})
 			.returning()
 			.then((response) => response[0]);
+		if (!newGitlab) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "Error creating the Gitlab provider",
+			});
+		}
+		return newGitlab;
 	});
 };
 
@@ -65,14 +72,29 @@ export const findGitlabById = async (gitlabId: string) => {
 
 export const updateGitlab = async (
 	gitlabId: string,
+	organizationId: string,
 	input: Partial<Gitlab>,
+	providerData?: { name: string },
 ) => {
-	return await db
-		.update(gitlab)
-		.set({
-			...input,
-		})
-		.where(eq(gitlab.gitlabId, gitlabId))
-		.returning()
-		.then((response) => response[0]);
+	return db.transaction(async (transaction) => {
+		const current = await transaction.query.gitlab.findFirst({
+			where: eq(gitlab.gitlabId, gitlabId),
+			with: { gitProvider: true },
+		});
+		if (!current || current.gitProvider.organizationId !== organizationId) {
+			throw new TRPCError({ code: "NOT_FOUND", message: "Gitlab Provider not found" });
+		}
+		if (providerData) {
+			await transaction
+				.update(gitProvider)
+				.set(providerData)
+				.where(eq(gitProvider.gitProviderId, current.gitProviderId));
+		}
+		const [updated] = await transaction
+			.update(gitlab)
+			.set(input)
+			.where(eq(gitlab.gitlabId, gitlabId))
+			.returning();
+		return updated;
+	});
 };

@@ -15,10 +15,13 @@ import {
 	validateDomain,
 } from "@dokploy/server";
 import { checkServicePermissionAndAccess } from "@dokploy/server/services/permission";
+import { assertWorkspaceResource } from "@dokploy/server/services/tenancy";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import {
+	assertOperatorRequest,
 	createTRPCRouter,
+	operatorProcedure,
 	protectedProcedure,
 	withPermission,
 } from "@/server/api/trpc";
@@ -36,13 +39,25 @@ export const domainRouter = createTRPCRouter({
 		.input(apiCreateDomain)
 		.mutation(async ({ input, ctx }) => {
 			try {
-				if (input.domainType === "compose" && input.composeId) {
+				if (input.composeId) {
 					await checkServicePermissionAndAccess(ctx, input.composeId, {
 						domain: ["create"],
 					});
-				} else if (input.domainType === "application" && input.applicationId) {
+				} else if (input.applicationId) {
 					await checkServicePermissionAndAccess(ctx, input.applicationId, {
 						domain: ["create"],
+					});
+				} else if (input.previewDeploymentId) {
+					const preview = await findPreviewDeploymentById(
+						input.previewDeploymentId,
+					);
+					await checkServicePermissionAndAccess(ctx, preview.applicationId, {
+						domain: ["create"],
+					});
+				} else {
+					throw new TRPCError({
+						code: "BAD_REQUEST",
+						message: "A domain target is required",
 					});
 				}
 				const domain = await createDomain(input);
@@ -54,6 +69,7 @@ export const domainRouter = createTRPCRouter({
 				});
 				return domain;
 			} catch (error) {
+				if (error instanceof TRPCError) throw error;
 				throw new TRPCError({
 					code: "BAD_REQUEST",
 					message:
@@ -83,17 +99,31 @@ export const domainRouter = createTRPCRouter({
 	generateDomain: withPermission("domain", "create")
 		.input(z.object({ appName: z.string(), serverId: z.string().optional() }))
 		.mutation(async ({ input, ctx }) => {
+			if (input.serverId) {
+				assertOperatorRequest(ctx.req);
+				const target = await findServerById(input.serverId);
+				assertWorkspaceResource(
+					ctx.session.activeOrganizationId,
+					target,
+					"Runtime target",
+				);
+			}
 			return generateTraefikMeDomain(
 				input.appName,
 				ctx.user.ownerId,
 				input.serverId,
 			);
 		}),
-	canGenerateTraefikMeDomains: withPermission("domain", "read")
+	canGenerateTraefikMeDomains: operatorProcedure
 		.input(z.object({ serverId: z.string() }))
-		.query(async ({ input }) => {
+		.query(async ({ input, ctx }) => {
 			if (input.serverId) {
 				const server = await findServerById(input.serverId);
+				assertWorkspaceResource(
+					ctx.session.activeOrganizationId,
+					server,
+					"Runtime target",
+				);
 				return server.ipAddress;
 			}
 			const settings = await getWebServerSettings();
@@ -104,6 +134,11 @@ export const domainRouter = createTRPCRouter({
 		.input(apiUpdateDomain)
 		.mutation(async ({ input, ctx }) => {
 			const currentDomain = await findDomainById(input.domainId);
+			assertWorkspaceResource(
+				ctx.session.activeOrganizationId,
+				currentDomain,
+				"Domain",
+			);
 			const serviceId = currentDomain.applicationId || currentDomain.composeId;
 			if (serviceId) {
 				await checkServicePermissionAndAccess(ctx, serviceId, {
@@ -143,6 +178,11 @@ export const domainRouter = createTRPCRouter({
 		}),
 	one: protectedProcedure.input(apiFindDomain).query(async ({ input, ctx }) => {
 		const domain = await findDomainById(input.domainId);
+		assertWorkspaceResource(
+			ctx.session.activeOrganizationId,
+			domain,
+			"Domain",
+		);
 		const serviceId = domain.applicationId || domain.composeId;
 		if (serviceId) {
 			await checkServicePermissionAndAccess(ctx, serviceId, {
@@ -162,6 +202,11 @@ export const domainRouter = createTRPCRouter({
 		.input(apiFindDomain)
 		.mutation(async ({ input, ctx }) => {
 			const domain = await findDomainById(input.domainId);
+			assertWorkspaceResource(
+				ctx.session.activeOrganizationId,
+				domain,
+				"Domain",
+			);
 			const serviceId = domain.applicationId || domain.composeId;
 			if (serviceId) {
 				await checkServicePermissionAndAccess(ctx, serviceId, {

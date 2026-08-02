@@ -2,7 +2,6 @@ import { relations } from "drizzle-orm";
 import {
 	boolean,
 	integer,
-	jsonb,
 	pgEnum,
 	pgTable,
 	text,
@@ -11,6 +10,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { organization } from "./account";
+import { encryptedJson, encryptedText } from "./utils";
 
 export const notificationType = pgEnum("notificationType", [
 	"slack",
@@ -91,7 +91,7 @@ export const slack = pgTable("slack", {
 		.notNull()
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
-	webhookUrl: text("webhookUrl").notNull(),
+	webhookUrl: encryptedText("webhookUrl").notNull(),
 	channel: text("channel"),
 });
 
@@ -100,7 +100,7 @@ export const telegram = pgTable("telegram", {
 		.notNull()
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
-	botToken: text("botToken").notNull(),
+	botToken: encryptedText("botToken").notNull(),
 	chatId: text("chatId").notNull(),
 	messageThreadId: text("messageThreadId"),
 });
@@ -110,7 +110,7 @@ export const discord = pgTable("discord", {
 		.notNull()
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
-	webhookUrl: text("webhookUrl").notNull(),
+	webhookUrl: encryptedText("webhookUrl").notNull(),
 	decoration: boolean("decoration"),
 });
 
@@ -122,7 +122,7 @@ export const email = pgTable("email", {
 	smtpServer: text("smtpServer").notNull(),
 	smtpPort: integer("smtpPort").notNull(),
 	username: text("username").notNull(),
-	password: text("password").notNull(),
+	password: encryptedText("password").notNull(),
 	fromAddress: text("fromAddress").notNull(),
 	toAddresses: text("toAddress").array().notNull(),
 });
@@ -132,7 +132,7 @@ export const resend = pgTable("resend", {
 		.notNull()
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
-	apiKey: text("apiKey").notNull(),
+	apiKey: encryptedText("apiKey").notNull(),
 	fromAddress: text("fromAddress").notNull(),
 	toAddresses: text("toAddress").array().notNull(),
 });
@@ -143,7 +143,7 @@ export const gotify = pgTable("gotify", {
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
 	serverUrl: text("serverUrl").notNull(),
-	appToken: text("appToken").notNull(),
+	appToken: encryptedText("appToken").notNull(),
 	priority: integer("priority").notNull().default(5),
 	decoration: boolean("decoration"),
 });
@@ -155,7 +155,7 @@ export const ntfy = pgTable("ntfy", {
 		.$defaultFn(() => nanoid()),
 	serverUrl: text("serverUrl").notNull(),
 	topic: text("topic").notNull(),
-	accessToken: text("accessToken"),
+	accessToken: encryptedText("accessToken"),
 	priority: integer("priority").notNull().default(3),
 });
 
@@ -164,7 +164,7 @@ export const mattermost = pgTable("mattermost", {
 		.notNull()
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
-	webhookUrl: text("webhookUrl").notNull(),
+	webhookUrl: encryptedText("webhookUrl").notNull(),
 	channel: text("channel"),
 	username: text("username"),
 });
@@ -174,8 +174,8 @@ export const custom = pgTable("custom", {
 		.notNull()
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
-	endpoint: text("endpoint").notNull(),
-	headers: jsonb("headers").$type<Record<string, string>>(),
+	endpoint: encryptedText("endpoint").notNull(),
+	headers: encryptedJson<Record<string, string>>("headers"),
 });
 
 export const lark = pgTable("lark", {
@@ -183,7 +183,7 @@ export const lark = pgTable("lark", {
 		.notNull()
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
-	webhookUrl: text("webhookUrl").notNull(),
+	webhookUrl: encryptedText("webhookUrl").notNull(),
 });
 
 export const pushover = pgTable("pushover", {
@@ -191,8 +191,8 @@ export const pushover = pgTable("pushover", {
 		.notNull()
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
-	userKey: text("userKey").notNull(),
-	apiToken: text("apiToken").notNull(),
+	userKey: encryptedText("userKey").notNull(),
+	apiToken: encryptedText("apiToken").notNull(),
 	priority: integer("priority").notNull().default(0),
 	retry: integer("retry"),
 	expire: integer("expire"),
@@ -203,7 +203,7 @@ export const teams = pgTable("teams", {
 		.notNull()
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
-	webhookUrl: text("webhookUrl").notNull(),
+	webhookUrl: encryptedText("webhookUrl").notNull(),
 });
 
 export const notificationsRelations = relations(notifications, ({ one }) => ({

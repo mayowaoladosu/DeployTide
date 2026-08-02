@@ -5,9 +5,15 @@ import { getWebServerSettings } from "@dokploy/server/services/web-server-settin
 import { generateRandomDomain } from "@dokploy/server/templates";
 import { manageDomain } from "@dokploy/server/utils/traefik/domain";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { z } from "zod";
-import { type apiCreateDomain, domains } from "../db/schema";
+import {
+	type apiCreateDomain,
+	applications,
+	compose,
+	domains,
+	previewDeployments,
+} from "../db/schema";
 import { findApplicationById } from "./application";
 import { detectCDNProvider } from "./cdn";
 import { findServerById } from "./server";
@@ -16,10 +22,74 @@ export type Domain = typeof domains.$inferSelect;
 
 export const createDomain = async (input: z.infer<typeof apiCreateDomain>) => {
 	const result = await db.transaction(async (tx) => {
+		const targets = [
+			input.applicationId,
+			input.composeId,
+			input.previewDeploymentId,
+		].filter(Boolean);
+		if (targets.length !== 1) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "A domain must target exactly one project resource",
+			});
+		}
+
+		let ownership:
+			| { organizationId: string; projectId: string; environmentId: string }
+			| undefined;
+		if (input.applicationId) {
+			const application = await tx.query.applications.findFirst({
+				where: eq(applications.applicationId, input.applicationId),
+				columns: {
+					organizationId: true,
+					projectId: true,
+					environmentId: true,
+					deletedAt: true,
+				},
+			});
+			if (application && !application.deletedAt) ownership = application;
+		} else if (input.composeId) {
+			const service = await tx.query.compose.findFirst({
+				where: and(
+					eq(compose.composeId, input.composeId),
+					isNull(compose.deletedAt),
+				),
+				with: { environment: { with: { project: true } } },
+			});
+			if (service) {
+				ownership = {
+					organizationId: service.environment.project.organizationId,
+					projectId: service.environment.projectId,
+					environmentId: service.environmentId,
+				};
+			}
+		} else if (input.previewDeploymentId) {
+			const preview = await tx.query.previewDeployments.findFirst({
+				where: eq(
+					previewDeployments.previewDeploymentId,
+					input.previewDeploymentId,
+				),
+				columns: {
+					organizationId: true,
+					projectId: true,
+					environmentId: true,
+					deletedAt: true,
+				},
+			});
+			if (preview && !preview.deletedAt) ownership = preview;
+		}
+		if (!ownership) {
+			throw new TRPCError({
+				code: "NOT_FOUND",
+				message: "Domain target not found",
+			});
+		}
+
 		const domain = await tx
 			.insert(domains)
 			.values({
 				...input,
+				...ownership,
 				host: input.host?.trim(),
 			} as typeof domains.$inferInsert)
 			.returning()
@@ -78,7 +148,7 @@ export const generateWildcardDomain = (
 
 export const findDomainById = async (domainId: string) => {
 	const domain = await db.query.domains.findFirst({
-		where: eq(domains.domainId, domainId),
+		where: and(eq(domains.domainId, domainId), isNull(domains.deletedAt)),
 		with: {
 			application: {
 				columns: { applicationId: true, appName: true, name: true },
@@ -96,7 +166,10 @@ export const findDomainById = async (domainId: string) => {
 
 export const findDomainsByApplicationId = async (applicationId: string) => {
 	const domainsArray = await db.query.domains.findMany({
-		where: eq(domains.applicationId, applicationId),
+		where: and(
+			eq(domains.applicationId, applicationId),
+			isNull(domains.deletedAt),
+		),
 		with: {
 			application: {
 				columns: { applicationId: true, appName: true, name: true },
@@ -109,7 +182,7 @@ export const findDomainsByApplicationId = async (applicationId: string) => {
 
 export const findDomainsByComposeId = async (composeId: string) => {
 	const domainsArray = await db.query.domains.findMany({
-		where: eq(domains.composeId, composeId),
+		where: and(eq(domains.composeId, composeId), isNull(domains.deletedAt)),
 		with: {
 			compose: {
 				columns: { composeId: true, appName: true, name: true },
@@ -130,7 +203,7 @@ export const updateDomainById = async (
 			...domainData,
 			...(domainData.host && { host: domainData.host.trim() }),
 		})
-		.where(eq(domains.domainId, domainId))
+		.where(and(eq(domains.domainId, domainId), isNull(domains.deletedAt)))
 		.returning();
 
 	return domain[0];
@@ -139,8 +212,9 @@ export const updateDomainById = async (
 export const removeDomainById = async (domainId: string) => {
 	await findDomainById(domainId);
 	const result = await db
-		.delete(domains)
-		.where(eq(domains.domainId, domainId))
+		.update(domains)
+		.set({ deletedAt: new Date() })
+		.where(and(eq(domains.domainId, domainId), isNull(domains.deletedAt)))
 		.returning();
 
 	return result[0];

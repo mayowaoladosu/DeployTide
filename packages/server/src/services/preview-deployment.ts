@@ -6,7 +6,7 @@ import {
 	previewDeployments,
 } from "@dokploy/server/db/schema";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import type { z } from "zod";
 import { generatePassword } from "../templates";
 import { removeService } from "../utils/docker/utils";
@@ -16,7 +16,7 @@ import { removeTraefikConfig } from "../utils/traefik/application";
 import { manageDomain } from "../utils/traefik/domain";
 import { findApplicationById } from "./application";
 import { removeDeploymentsByPreviewDeploymentId } from "./deployment";
-import { createDomain } from "./domain";
+import { createDomain, removeDomainById } from "./domain";
 import { type Github, getIssueComment } from "./github";
 import { getWebServerSettings } from "./web-server-settings";
 
@@ -26,7 +26,10 @@ export const findPreviewDeploymentById = async (
 	previewDeploymentId: string,
 ) => {
 	const application = await db.query.previewDeployments.findFirst({
-		where: eq(previewDeployments.previewDeploymentId, previewDeploymentId),
+		where: and(
+			eq(previewDeployments.previewDeploymentId, previewDeploymentId),
+			isNull(previewDeployments.deletedAt),
+		),
 		with: {
 			domain: true,
 			application: {
@@ -68,10 +71,21 @@ export const removePreviewDeployment = async (previewDeploymentId: string) => {
 			async () =>
 				await removeTraefikConfig(application?.appName, application?.serverId),
 			async () =>
+				previewDeployment.domainId
+					? await removeDomainById(previewDeployment.domainId)
+					: undefined,
+			async () =>
 				await db
-					.delete(previewDeployments)
+					.update(previewDeployments)
+					.set({ deletedAt: new Date() })
 					.where(
-						eq(previewDeployments.previewDeploymentId, previewDeploymentId),
+						and(
+							eq(
+								previewDeployments.previewDeploymentId,
+								previewDeploymentId,
+							),
+							isNull(previewDeployments.deletedAt),
+						),
 					)
 					.returning(),
 		];
@@ -104,7 +118,12 @@ export const updatePreviewDeployment = async (
 		.set({
 			...previewDeploymentData,
 		})
-		.where(eq(previewDeployments.previewDeploymentId, previewDeploymentId))
+		.where(
+			and(
+				eq(previewDeployments.previewDeploymentId, previewDeploymentId),
+				isNull(previewDeployments.deletedAt),
+			),
+		)
 		.returning();
 
 	return application;
@@ -114,7 +133,10 @@ export const findPreviewDeploymentsByApplicationId = async (
 	applicationId: string,
 ) => {
 	const deploymentsList = await db.query.previewDeployments.findMany({
-		where: eq(previewDeployments.applicationId, applicationId),
+		where: and(
+			eq(previewDeployments.applicationId, applicationId),
+			isNull(previewDeployments.deletedAt),
+		),
 		orderBy: desc(previewDeployments.createdAt),
 		with: {
 			deployments: {
@@ -163,6 +185,9 @@ export const createPreviewDeployment = async (
 			...schema,
 			appName: appName,
 			pullRequestCommentId: `${issue.data.id}`,
+			organizationId: application.organizationId,
+			projectId: application.projectId,
+			environmentId: application.environmentId,
 		})
 		.returning()
 		.then((value) => value[0]);
@@ -208,7 +233,10 @@ export const findPreviewDeploymentsByPullRequestId = async (
 	pullRequestId: string,
 ) => {
 	const previewDeploymentResult = await db.query.previewDeployments.findMany({
-		where: eq(previewDeployments.pullRequestId, pullRequestId),
+		where: and(
+			eq(previewDeployments.pullRequestId, pullRequestId),
+			isNull(previewDeployments.deletedAt),
+		),
 	});
 
 	return previewDeploymentResult;
@@ -222,6 +250,7 @@ export const findPreviewDeploymentByApplicationId = async (
 		where: and(
 			eq(previewDeployments.applicationId, applicationId),
 			eq(previewDeployments.pullRequestId, pullRequestId),
+			isNull(previewDeployments.deletedAt),
 		),
 	});
 

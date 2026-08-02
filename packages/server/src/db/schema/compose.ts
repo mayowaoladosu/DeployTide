@@ -1,15 +1,19 @@
 import { relations } from "drizzle-orm";
 import {
 	boolean,
+	foreignKey,
 	integer,
 	jsonb,
 	pgEnum,
 	pgTable,
 	text,
+	timestamp,
+	uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { organization } from "./account";
 import { backups } from "./backups";
 import { bitbucket } from "./bitbucket";
 import { deployments } from "./deployment";
@@ -20,6 +24,7 @@ import { github } from "./github";
 import { gitlab } from "./gitlab";
 import { mounts } from "./mount";
 import { patch } from "./patch";
+import { projects } from "./project";
 import { schedules } from "./schedule";
 import { server } from "./server";
 import { applicationStatus, triggerType } from "./shared";
@@ -53,7 +58,8 @@ export const compose = pgTable("compose", {
 	description: text("description"),
 	env: encryptedText("env"),
 	composeFile: text("composeFile").notNull().default(""),
-	refreshToken: text("refreshToken").$defaultFn(() => nanoid()),
+	refreshToken: encryptedText("refreshToken").$defaultFn(() => nanoid()),
+	refreshTokenDigest: text("refreshTokenDigest"),
 	sourceType: sourceTypeCompose("sourceType").notNull().default("github"),
 	composeType: composeType("composeType").notNull().default("docker-compose"),
 	// Github
@@ -99,12 +105,19 @@ export const compose = pgTable("compose", {
 	triggerType: triggerType("triggerType").default("push"),
 	composeStatus: applicationStatus("composeStatus").notNull().default("idle"),
 	icon: text("icon"),
+	organizationId: text("organizationId")
+		.notNull()
+		.references(() => organization.id, { onDelete: "cascade" }),
+	projectId: text("projectId")
+		.notNull()
+		.references(() => projects.projectId, { onDelete: "cascade" }),
 	environmentId: text("environmentId")
 		.notNull()
 		.references(() => environments.environmentId, { onDelete: "cascade" }),
 	createdAt: text("createdAt")
 		.notNull()
 		.$defaultFn(() => new Date().toISOString()),
+	deletedAt: timestamp("deletedAt", { withTimezone: true }),
 	watchPaths: text("watchPaths").array(),
 	githubId: text("githubId").references(() => github.githubId, {
 		onDelete: "set null",
@@ -130,9 +143,38 @@ export const compose = pgTable("compose", {
 			}>
 		>()
 		.default([]),
-});
+}, (table) => [
+	uniqueIndex("compose_id_organization_project_environment_unique").on(
+		table.composeId,
+		table.organizationId,
+		table.projectId,
+		table.environmentId,
+	),
+	foreignKey({
+		name: "compose_project_organization_fk",
+		columns: [table.projectId, table.organizationId],
+		foreignColumns: [projects.projectId, projects.organizationId],
+	}).onDelete("cascade"),
+	foreignKey({
+		name: "compose_environment_project_organization_fk",
+		columns: [table.environmentId, table.projectId, table.organizationId],
+		foreignColumns: [
+			environments.environmentId,
+			environments.projectId,
+			environments.organizationId,
+		],
+	}).onDelete("cascade"),
+]);
 
 export const composeRelations = relations(compose, ({ one, many }) => ({
+	organization: one(organization, {
+		fields: [compose.organizationId],
+		references: [organization.id],
+	}),
+	project: one(projects, {
+		fields: [compose.projectId],
+		references: [projects.projectId],
+	}),
 	environment: one(environments, {
 		fields: [compose.environmentId],
 		references: [environments.environmentId],
@@ -253,13 +295,50 @@ export const apiFetchServices = z.object({
 });
 
 export const apiUpdateCompose = createSchema
-	.partial()
-	.extend({
-		composeId: z.string(),
-		composeFile: z.string().optional(),
-		command: z.string().optional(),
+	.pick({
+		name: true,
+		description: true,
+		composeFile: true,
+		command: true,
+		composePath: true,
+		composeType: true,
+		suffix: true,
+		randomize: true,
+		isolatedDeployment: true,
+		isolatedDeploymentsVolume: true,
+		icon: true,
+		serviceNetworks: true,
+		autoDeploy: true,
+		sourceType: true,
+		branch: true,
+		repository: true,
+		owner: true,
+		githubId: true,
+		gitlabProjectId: true,
+		gitlabRepository: true,
+		gitlabOwner: true,
+		gitlabBranch: true,
+		gitlabPathNamespace: true,
+		gitlabId: true,
+		bitbucketRepository: true,
+		bitbucketRepositorySlug: true,
+		bitbucketOwner: true,
+		bitbucketBranch: true,
+		bitbucketId: true,
+		giteaRepository: true,
+		giteaOwner: true,
+		giteaBranch: true,
+		giteaId: true,
+		customGitUrl: true,
+		customGitBranch: true,
+		customGitSSHKeyId: true,
+		enableSubmodules: true,
+		watchPaths: true,
+		triggerType: true,
+		composeStatus: true,
 	})
-	.omit({ serverId: true });
+	.partial()
+	.extend({ composeId: z.string().min(1) });
 
 export const apiSaveEnvironmentVariablesCompose = createSchema
 	.pick({

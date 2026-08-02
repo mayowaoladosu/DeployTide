@@ -83,8 +83,8 @@ export const EditBitbucketProvider = ({ bitbucketId }: Props) => {
 			email: bitbucket?.bitbucketEmail || "",
 			workspaceName: bitbucket?.bitbucketWorkspaceName || "",
 			name: bitbucket?.gitProvider.name || "",
-			apiToken: bitbucket?.apiToken || "",
-			appPassword: bitbucket?.appPassword || "",
+			apiToken: "",
+			appPassword: "",
 		});
 	}, [form, isOpen, bitbucket]);
 

@@ -21,7 +21,11 @@ vi.mock("@dokploy/server/services/web-server-settings", () => ({
 	getWebServerSettings: (...args: unknown[]) => getWebServerSettings(...args),
 }));
 
-vi.mock("drizzle-orm", () => ({ eq: vi.fn() }));
+vi.mock("drizzle-orm", () => ({
+	and: vi.fn((...conditions: unknown[]) => ({ conditions })),
+	eq: vi.fn((field: unknown, value: unknown) => ({ field, value })),
+	isNull: vi.fn((field: unknown) => ({ field, value: null })),
+}));
 
 import { resolveBuildsConcurrency } from "../../server/queues/concurrency";
 import { LOCAL_PARTITION } from "../../server/queues/in-memory-queue";

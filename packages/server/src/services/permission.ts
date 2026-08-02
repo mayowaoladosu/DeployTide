@@ -9,6 +9,11 @@ import {
 	ownerRole,
 	statements,
 } from "../lib/access-control";
+import {
+	findWorkspaceEnvironment,
+	findWorkspaceProject,
+	findWorkspaceServiceRuntime,
+} from "./tenancy";
 
 type Statements = typeof statements;
 type Resource = keyof Statements;
@@ -174,6 +179,7 @@ export const checkProjectAccess = async (
 ) => {
 	const userId = ctx.user.id;
 	const organizationId = ctx.session.activeOrganizationId;
+	if (projectId) await findWorkspaceProject(organizationId, projectId);
 	const memberRecord = await findMemberByUserId(userId, organizationId);
 
 	await checkPermission(ctx, { project: [action] });
@@ -200,6 +206,7 @@ export const checkServicePermissionAndAccess = async (
 ) => {
 	const userId = ctx.user.id;
 	const organizationId = ctx.session.activeOrganizationId;
+	await findWorkspaceServiceRuntime(organizationId, serviceId);
 	const memberRecord = await findMemberByUserId(userId, organizationId);
 	await checkPermission(ctx, permissions);
 	if (memberRecord.role !== "owner" && memberRecord.role !== "admin") {
@@ -219,6 +226,11 @@ export const checkServiceAccess = async (
 ) => {
 	const userId = ctx.user.id;
 	const organizationId = ctx.session.activeOrganizationId;
+	if (action === "create") {
+		await findWorkspaceProject(organizationId, serviceId);
+	} else {
+		await findWorkspaceServiceRuntime(organizationId, serviceId);
+	}
 	const memberRecord = await findMemberByUserId(userId, organizationId);
 
 	await checkPermission(ctx, { service: [action] });
@@ -249,6 +261,7 @@ export const checkEnvironmentAccess = async (
 ) => {
 	const userId = ctx.user.id;
 	const organizationId = ctx.session.activeOrganizationId;
+	await findWorkspaceEnvironment(organizationId, environmentId);
 	const memberRecord = await findMemberByUserId(userId, organizationId);
 
 	await checkPermission(ctx, { environment: [action] });
@@ -273,6 +286,7 @@ export const checkEnvironmentCreationPermission = async (
 ) => {
 	const userId = ctx.user.id;
 	const organizationId = ctx.session.activeOrganizationId;
+	await findWorkspaceProject(organizationId, projectId);
 	const memberRecord = await findMemberByUserId(userId, organizationId);
 
 	await checkPermission(ctx, { environment: ["create"] });

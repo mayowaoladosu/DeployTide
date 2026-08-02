@@ -58,10 +58,10 @@ export const ShowDockerLogs = ({ appName, serverId, serviceId }: Props) => {
 	const [option, setOption] = useState<"swarm" | "native">("native");
 
 	const { data: services, isPending: servicesLoading } =
-		api.docker.getServiceContainersByAppName.useQuery(
+		api.application.logContainers.useQuery(
 			{
-				appName,
-				serverId,
+				applicationId: serviceId || "",
+				runType: "swarm",
 			},
 			{
 				enabled: !!appName && option === "swarm",
@@ -69,10 +69,10 @@ export const ShowDockerLogs = ({ appName, serverId, serviceId }: Props) => {
 		);
 
 	const { data: containers, isPending: containersLoading } =
-		api.docker.getContainersByAppNameMatch.useQuery(
+		api.application.logContainers.useQuery(
 			{
-				appName,
-				serverId,
+				applicationId: serviceId || "",
+				runType: "native",
 			},
 			{
 				enabled: !!appName && option === "native",

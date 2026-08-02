@@ -10,7 +10,10 @@ import {
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
-import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
+import {
+	createTRPCRouter,
+	operatorProcedure as protectedProcedure,
+} from "@/server/api/trpc";
 import { db } from "@/server/db";
 import {
 	apiCreateNetwork,

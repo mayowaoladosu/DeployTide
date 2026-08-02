@@ -2,17 +2,21 @@ import { relations } from "drizzle-orm";
 import {
 	bigint,
 	boolean,
+	foreignKey,
 	integer,
 	json,
 	pgTable,
 	text,
+	uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { organization } from "./account";
 import { backups } from "./backups";
 import { environments } from "./environment";
 import { mounts } from "./mount";
+import { projects } from "./project";
 import { server } from "./server";
 import {
 	applicationStatus,
@@ -53,7 +57,7 @@ export const libsql = pgTable("libsql", {
 		.unique(),
 	description: text("description"),
 	databaseUser: text("databaseUser").notNull(),
-	databasePassword: text("databasePassword").notNull(),
+	databasePassword: encryptedText("databasePassword").notNull(),
 	sqldNode: sqldNode("sqldNode").notNull().default("primary"),
 	sqldPrimaryUrl: text("sqldPrimaryUrl"),
 	enableNamespaces: boolean("enableNamespaces").notNull().default(false),
@@ -91,15 +95,46 @@ export const libsql = pgTable("libsql", {
 		.notNull()
 		.$defaultFn(() => new Date().toISOString()),
 
+	organizationId: text("organizationId")
+		.notNull()
+		.references(() => organization.id, { onDelete: "cascade" }),
+	projectId: text("projectId")
+		.notNull()
+		.references(() => projects.projectId, { onDelete: "cascade" }),
 	environmentId: text("environmentId")
 		.notNull()
 		.references(() => environments.environmentId, { onDelete: "cascade" }),
 	serverId: text("serverId").references(() => server.serverId, {
 		onDelete: "cascade",
 	}),
-});
+}, (table) => [
+	uniqueIndex("libsql_id_organization_project_environment_unique").on(
+		table.libsqlId,
+		table.organizationId,
+		table.projectId,
+		table.environmentId,
+	),
+	foreignKey({
+		name: "libsql_project_organization_fk",
+		columns: [table.projectId, table.organizationId],
+		foreignColumns: [projects.projectId, projects.organizationId],
+	}).onDelete("cascade"),
+	foreignKey({
+		name: "libsql_environment_project_organization_fk",
+		columns: [table.environmentId, table.projectId, table.organizationId],
+		foreignColumns: [environments.environmentId, environments.projectId, environments.organizationId],
+	}).onDelete("cascade"),
+]);
 
 export const libsqlRelations = relations(libsql, ({ one, many }) => ({
+	organization: one(organization, {
+		fields: [libsql.organizationId],
+		references: [organization.id],
+	}),
+	project: one(projects, {
+		fields: [libsql.projectId],
+		references: [projects.projectId],
+	}),
 	environment: one(environments, {
 		fields: [libsql.environmentId],
 		references: [environments.environmentId],

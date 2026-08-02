@@ -11,6 +11,30 @@ import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { certificateType } from "./shared";
+import { encryptedJson, encryptedText } from "./utils";
+
+export interface MetricsConfig {
+	server: {
+		type: "Dokploy" | "Remote";
+		refreshRate: number;
+		port: number;
+		token: string;
+		urlCallback: string;
+		retentionDays: number;
+		cronJob: string;
+		thresholds: {
+			cpu: number;
+			memory: number;
+		};
+	};
+	containers: {
+		refreshRate: number;
+		services: {
+			include: string[];
+			exclude: string[];
+		};
+	};
+}
 
 export const webServerSettings = pgTable("webServerSettings", {
 	id: text("id")
@@ -23,56 +47,11 @@ export const webServerSettings = pgTable("webServerSettings", {
 	https: boolean("https").notNull().default(false),
 	host: text("host"),
 	letsEncryptEmail: text("letsEncryptEmail"),
-	sshPrivateKey: text("sshPrivateKey"),
+	sshPrivateKey: encryptedText("sshPrivateKey"),
 	enableDockerCleanup: boolean("enableDockerCleanup").notNull().default(true),
 	logCleanupCron: text("logCleanupCron").default("0 0 * * *"),
 	// Metrics Configuration
-	metricsConfig: jsonb("metricsConfig")
-		.$type<{
-			server: {
-				type: "Dokploy" | "Remote";
-				refreshRate: number;
-				port: number;
-				token: string;
-				urlCallback: string;
-				retentionDays: number;
-				cronJob: string;
-				thresholds: {
-					cpu: number;
-					memory: number;
-				};
-			};
-			containers: {
-				refreshRate: number;
-				services: {
-					include: string[];
-					exclude: string[];
-				};
-			};
-		}>()
-		.notNull()
-		.default({
-			server: {
-				type: "Dokploy",
-				refreshRate: 60,
-				port: 4500,
-				token: "",
-				retentionDays: 2,
-				cronJob: "",
-				urlCallback: "",
-				thresholds: {
-					cpu: 0,
-					memory: 0,
-				},
-			},
-			containers: {
-				refreshRate: 60,
-				services: {
-					include: [],
-					exclude: [],
-				},
-			},
-		}),
+	metricsConfig: encryptedJson<MetricsConfig>("metricsConfig").notNull(),
 	// Whitelabeling Configuration (Enterprise / Proprietary)
 	whitelabelingConfig: jsonb("whitelabelingConfig")
 		.$type<{

@@ -8,7 +8,6 @@ import {
 	haveGitlabRequirements,
 	testGitlabConnection,
 	updateGitlab,
-	updateGitProvider,
 } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
 import { TRPCError } from "@trpc/server";
@@ -43,7 +42,13 @@ export const gitlabRouter = createTRPCRouter({
 					resourceName: input.name,
 				});
 
-				return result;
+				const {
+					secret: _secret,
+					accessToken: _accessToken,
+					refreshToken: _refreshToken,
+					...safeResult
+				} = result;
+				return safeResult;
 			} catch (error) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
@@ -57,7 +62,13 @@ export const gitlabRouter = createTRPCRouter({
 		.query(async ({ input, ctx }) => {
 			const gitlab = await findGitlabById(input.gitlabId);
 			await assertGitProviderAccess(ctx.session, gitlab.gitProvider);
-			return gitlab;
+			const {
+				secret: _secret,
+				accessToken: _accessToken,
+				refreshToken: _refreshToken,
+				...safeGitlab
+			} = gitlab;
+			return safeGitlab;
 		}),
 	gitlabProviders: protectedProcedure.query(async ({ ctx }) => {
 		const accessibleIds = await getAccessibleGitProviderIds(ctx.session);
@@ -125,25 +136,21 @@ export const gitlabRouter = createTRPCRouter({
 	update: withPermission("gitProviders", "create")
 		.input(apiUpdateGitlab)
 		.mutation(async ({ input, ctx }) => {
-			if (input.name) {
-				await updateGitProvider(input.gitProviderId, {
-					name: input.name,
-					organizationId: ctx.session.activeOrganizationId,
-				});
-
-				await updateGitlab(input.gitlabId, {
-					...input,
-				});
-			} else {
-				await updateGitlab(input.gitlabId, {
-					...input,
-				});
-			}
+			const gitlab = await findGitlabById(input.gitlabId);
+			await assertGitProviderAccess(ctx.session, gitlab.gitProvider);
+			await updateGitlab(input.gitlabId, ctx.session.activeOrganizationId, {
+				applicationId: input.applicationId,
+				groupName: input.groupName,
+				redirectUri: input.redirectUri,
+				gitlabUrl: input.gitlabUrl,
+				gitlabInternalUrl: input.gitlabInternalUrl,
+				...(input.secret ? { secret: input.secret } : {}),
+			}, { name: input.name });
 
 			await audit(ctx, {
 				action: "update",
 				resourceType: "gitProvider",
-				resourceId: input.gitProviderId,
+				resourceId: gitlab.gitProviderId,
 				resourceName: input.name,
 			});
 		}),

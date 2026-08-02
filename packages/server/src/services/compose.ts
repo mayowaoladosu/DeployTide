@@ -6,6 +6,7 @@ import {
 	buildAppName,
 	cleanAppName,
 	compose,
+	deployments,
 } from "@dokploy/server/db/schema";
 import { getBuildComposeCommand } from "@dokploy/server/utils/builders/compose";
 import { randomizeSpecificationFile } from "@dokploy/server/utils/docker/compose";
@@ -32,9 +33,10 @@ import { cloneGithubRepository } from "@dokploy/server/utils/providers/github";
 import { cloneGitlabRepository } from "@dokploy/server/utils/providers/gitlab";
 import { getCreateComposeFileCommand } from "@dokploy/server/utils/providers/raw";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { quote } from "shell-quote";
 import type { z } from "zod";
+import { digestDeploymentToken } from "../lib/sensitive-digest";
 import { encodeBase64 } from "../utils/docker/utils";
 import { getDokployUrl } from "./admin";
 import {
@@ -44,6 +46,7 @@ import {
 } from "./deployment";
 import { generateApplyPatchesCommand } from "./patch";
 import { validUniqueServerAppName } from "./project";
+import { resolveEnvironmentOwnership } from "./tenancy";
 
 export type Compose = typeof compose.$inferSelect;
 
@@ -60,28 +63,45 @@ export const createCompose = async (
 		});
 	}
 
-	const newDestination = await db
-		.insert(compose)
-		.values({
-			...input,
-			composeFile: input.composeFile || "",
-			appName,
-		})
-		.returning()
-		.then((value) => value[0]);
+	return db.transaction(async (transaction) => {
+		const ownership = await resolveEnvironmentOwnership(
+			transaction,
+			input.environmentId,
+		);
+		const [newDestination] = await transaction
+			.insert(compose)
+			.values({
+				...input,
+				...ownership,
+				composeFile: input.composeFile || "",
+				appName,
+			})
+			.returning();
 
-	if (!newDestination) {
-		throw new TRPCError({
-			code: "BAD_REQUEST",
-			message: "Error input: Inserting compose",
-		});
-	}
-
-	return newDestination;
+		if (!newDestination) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "Error input: Inserting compose",
+			});
+		}
+		if (newDestination.refreshToken) {
+			newDestination.refreshTokenDigest = digestDeploymentToken(
+				newDestination.refreshToken,
+			);
+			await transaction
+				.update(compose)
+				.set({ refreshTokenDigest: newDestination.refreshTokenDigest })
+				.where(eq(compose.composeId, newDestination.composeId));
+		}
+		return newDestination;
+	});
 };
 
 export const createComposeByTemplate = async (
-	input: typeof compose.$inferInsert,
+	input: Omit<typeof compose.$inferInsert, "organizationId" | "projectId"> &
+		Partial<
+			Pick<typeof compose.$inferInsert, "organizationId" | "projectId">
+		>,
 ) => {
 	const appName = cleanAppName(input.appName);
 	if (appName) {
@@ -94,41 +114,71 @@ export const createComposeByTemplate = async (
 			});
 		}
 	}
-	const newDestination = await db
-		.insert(compose)
-		.values({
-			...input,
-			appName,
-		})
-		.returning()
-		.then((value) => value[0]);
+	return db.transaction(async (transaction) => {
+		const ownership = await resolveEnvironmentOwnership(
+			transaction,
+			input.environmentId,
+		);
+		const [newDestination] = await transaction
+			.insert(compose)
+			.values({
+				...input,
+				...ownership,
+				appName,
+			})
+			.returning();
 
-	if (!newDestination) {
-		throw new TRPCError({
-			code: "BAD_REQUEST",
-			message: "Error input: Inserting compose",
-		});
-	}
-
-	return newDestination;
+		if (!newDestination) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "Error input: Inserting compose",
+			});
+		}
+		if (newDestination.refreshToken) {
+			newDestination.refreshTokenDigest = digestDeploymentToken(
+				newDestination.refreshToken,
+			);
+			await transaction
+				.update(compose)
+				.set({ refreshTokenDigest: newDestination.refreshTokenDigest })
+				.where(eq(compose.composeId, newDestination.composeId));
+		}
+		return newDestination;
+	});
 };
 
 export const findComposeById = async (composeId: string) => {
 	const result = await db.query.compose.findFirst({
-		where: eq(compose.composeId, composeId),
+		where: and(eq(compose.composeId, composeId), isNull(compose.deletedAt)),
 		with: {
 			environment: {
 				with: {
 					project: true,
 				},
 			},
-			deployments: true,
+			deployments: { where: isNull(deployments.deletedAt) },
 			mounts: true,
 			domains: true,
-			github: true,
-			gitlab: true,
-			bitbucket: true,
-			gitea: true,
+			github: {
+				columns: {
+					githubClientSecret: false,
+					githubPrivateKey: false,
+					githubWebhookSecret: false,
+				},
+			},
+			gitlab: {
+				columns: { secret: false, accessToken: false, refreshToken: false },
+			},
+			bitbucket: {
+				columns: { appPassword: false, apiToken: false },
+			},
+			gitea: {
+				columns: {
+					clientSecret: false,
+					accessToken: false,
+					refreshToken: false,
+				},
+			},
 			server: true,
 			backups: {
 				with: {
@@ -143,7 +193,7 @@ export const findComposeById = async (composeId: string) => {
 			},
 		},
 	});
-	if (!result) {
+	if (!result || result.environment.deletedAt || result.environment.project.deletedAt) {
 		throw new TRPCError({
 			code: "NOT_FOUND",
 			message: "Compose not found",
@@ -198,17 +248,64 @@ export const loadServices = async (
 export const updateCompose = async (
 	composeId: string,
 	composeData: Partial<Compose>,
+	options?: {
+		executor?: Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
+		organizationId?: string;
+	},
 ) => {
 	const { appName, ...rest } = composeData;
-	const composeResult = await db
+	const executor = options?.executor ?? db;
+	const current = await executor.query.compose.findFirst({
+		where: and(
+			eq(compose.composeId, composeId),
+			isNull(compose.deletedAt),
+			...(options?.organizationId
+				? [eq(compose.organizationId, options.organizationId)]
+				: []),
+		),
+		columns: { environmentId: true },
+		with: { environment: { with: { project: true } } },
+	});
+	if (
+		!current ||
+		current.environment.deletedAt ||
+		current.environment.project.deletedAt
+	) {
+		throw new TRPCError({ code: "NOT_FOUND", message: "Compose not found" });
+	}
+	if (rest.refreshToken !== undefined) {
+		rest.refreshTokenDigest = rest.refreshToken
+			? digestDeploymentToken(rest.refreshToken)
+			: null;
+	}
+	const composeResult = await executor
 		.update(compose)
 		.set({
 			...rest,
 		})
-		.where(eq(compose.composeId, composeId))
+		.where(
+			and(
+				eq(compose.composeId, composeId),
+				eq(compose.environmentId, current.environmentId),
+				isNull(compose.deletedAt),
+			),
+		)
 		.returning();
 
 	return composeResult[0];
+};
+
+export const softDeleteCompose = async (composeId: string) => {
+	const [deleted] = await db
+		.update(compose)
+		.set({
+			deletedAt: new Date(),
+			autoDeploy: false,
+			refreshTokenDigest: null,
+		})
+		.where(and(eq(compose.composeId, composeId), isNull(compose.deletedAt)))
+		.returning();
+	return deleted ?? null;
 };
 
 export const deployCompose = async ({
@@ -281,6 +378,20 @@ export const deployCompose = async ({
 			await execAsync(commandWithLog);
 		}
 
+		if (compose.sourceType !== "raw") {
+			const commitInfo = await getGitCommitInfo({
+				...compose,
+				type: "compose",
+			});
+			if (commitInfo) {
+				await updateDeployment(deployment.deploymentId, {
+					title: commitInfo.message,
+					description: `Commit: ${commitInfo.hash}`,
+					sourceRevision: commitInfo.hash,
+					sourceMessage: commitInfo.message,
+				});
+			}
+		}
 		await updateDeploymentStatus(deployment.deploymentId, "done");
 		await updateCompose(composeId, {
 			composeStatus: "done",
@@ -325,19 +436,6 @@ export const deployCompose = async ({
 			organizationId: compose.environment.project.organizationId,
 		});
 		throw error;
-	} finally {
-		if (compose.sourceType !== "raw") {
-			const commitInfo = await getGitCommitInfo({
-				...compose,
-				type: "compose",
-			});
-			if (commitInfo) {
-				await updateDeployment(deployment.deploymentId, {
-					title: commitInfo.message,
-					description: `Commit: ${commitInfo.hash}`,
-				});
-			}
-		}
 	}
 };
 

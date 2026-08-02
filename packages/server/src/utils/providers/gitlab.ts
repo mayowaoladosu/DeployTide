@@ -46,11 +46,15 @@ export const refreshGitlabToken = async (gitlabProviderId: string) => {
 
 	const expiresAt = Math.floor(Date.now() / 1000) + data.expires_in;
 
-	await updateGitlab(gitlabProviderId, {
+	await updateGitlab(
+		gitlabProviderId,
+		gitlabProvider.gitProvider.organizationId,
+		{
 		accessToken: data.access_token,
 		refreshToken: data.refresh_token,
 		expiresAt,
-	});
+		},
+	);
 	return data;
 };
 

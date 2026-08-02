@@ -46,12 +46,12 @@ import {
 	writeTraefikConfigInPath,
 	writeTraefikSetup,
 } from "@dokploy/server";
-import { db } from "@dokploy/server/db";
 import { BRAND } from "@dokploy/server/brand";
+import { db } from "@dokploy/server/db";
 import { checkPermission } from "@dokploy/server/services/permission";
 import { generateOpenApiDocument } from "@dokploy/trpc-openapi";
 import { TRPCError } from "@trpc/server";
-import { eq, sql } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import { scheduledJobs, scheduleJob } from "node-schedule";
 import { parse, stringify } from "yaml";
 import { z } from "zod";
@@ -75,14 +75,16 @@ import { removeJob, schedule } from "@/server/utils/backup";
 import packageInfo from "../../../package.json";
 import { appRouter } from "../root";
 import {
-	adminProcedure,
 	createTRPCRouter,
+	operatorProcedure,
 	protectedProcedure,
 	publicProcedure,
 } from "../trpc";
 
+const adminProcedure = operatorProcedure;
+
 export const settingsRouter = createTRPCRouter({
-	getWebServerSettings: protectedProcedure.query(async () => {
+	getWebServerSettings: operatorProcedure.query(async () => {
 		if (IS_CLOUD) {
 			return null;
 		}
@@ -559,7 +561,7 @@ export const settingsRouter = createTRPCRouter({
 	getReleaseTag: protectedProcedure.query(() => {
 		return getDokployImageTag();
 	}),
-	readDirectories: protectedProcedure
+	readDirectories: operatorProcedure
 		.input(apiServerSchema)
 		.query(async ({ ctx, input }) => {
 			try {
@@ -572,7 +574,7 @@ export const settingsRouter = createTRPCRouter({
 			}
 		}),
 
-	updateTraefikFile: protectedProcedure
+	updateTraefikFile: operatorProcedure
 		.input(apiModifyTraefikConfig)
 		.mutation(async ({ input, ctx }) => {
 			await checkPermission(ctx, { traefikFiles: ["write"] });
@@ -589,7 +591,7 @@ export const settingsRouter = createTRPCRouter({
 			return true;
 		}),
 
-	readTraefikFile: protectedProcedure
+	readTraefikFile: operatorProcedure
 		.input(apiReadTraefikConfig)
 		.query(async ({ input, ctx }) => {
 			await checkPermission(ctx, { traefikFiles: ["read"] });
@@ -604,7 +606,7 @@ export const settingsRouter = createTRPCRouter({
 
 			return readConfigInPath(input.path, input.serverId);
 		}),
-	getIp: protectedProcedure.query(async () => {
+	getIp: operatorProcedure.query(async () => {
 		if (IS_CLOUD) {
 			return "";
 		}
@@ -749,7 +751,7 @@ export const settingsRouter = createTRPCRouter({
 			return ports.some((port) => port.targetPort === 8080);
 		}),
 
-	readStatsLogs: protectedProcedure
+	readStatsLogs: operatorProcedure
 		.meta({
 			openapi: {
 				path: "/read-stats-logs",
@@ -812,7 +814,7 @@ export const settingsRouter = createTRPCRouter({
 			const processedLogs = processLogs(rawConfig as string, input?.dateRange);
 			return processedLogs || [];
 		}),
-	haveActivateRequests: protectedProcedure.query(async () => {
+	haveActivateRequests: operatorProcedure.query(async () => {
 		if (IS_CLOUD) {
 			return true;
 		}
@@ -827,7 +829,7 @@ export const settingsRouter = createTRPCRouter({
 
 		return !!parsedConfig?.accessLog?.filePath;
 	}),
-	toggleRequests: protectedProcedure
+	toggleRequests: operatorProcedure
 		.input(
 			z.object({
 				enable: z.boolean(),
@@ -872,7 +874,10 @@ export const settingsRouter = createTRPCRouter({
 	}),
 	isUserSubscribed: protectedProcedure.query(async ({ ctx }) => {
 		const haveServers = await db.query.server.findMany({
-			where: eq(server.organizationId, ctx.session?.activeOrganizationId || ""),
+			where: and(
+				eq(server.organizationId, ctx.session?.activeOrganizationId || ""),
+				isNull(server.deletedAt),
+			),
 		});
 		const haveProjects = await db.query.projects.findMany({
 			where: eq(
@@ -1038,7 +1043,7 @@ export const settingsRouter = createTRPCRouter({
 			const ports = await readPorts("dokploy-traefik", input?.serverId);
 			return ports;
 		}),
-	updateLogCleanup: protectedProcedure
+	updateLogCleanup: operatorProcedure
 		.input(
 			z.object({
 				cronExpression: z.string().nullable(),
@@ -1062,7 +1067,7 @@ export const settingsRouter = createTRPCRouter({
 			return result;
 		}),
 
-	getLogCleanupStatus: protectedProcedure.query(async () => {
+	getLogCleanupStatus: operatorProcedure.query(async () => {
 		return getLogCleanupStatus();
 	}),
 

@@ -1,14 +1,17 @@
 import {
+	beginDeploymentCancellation,
 	clearOldDeployments,
 	createApplication,
 	deleteAllMiddlewares,
 	findApplicationById,
 	findEnvironmentById,
 	findProjectById,
+	findWorkspaceServiceRuntime,
 	getAccessibleServerIds,
 	getApplicationStats,
 	getContainerLogs,
-	getWebServerSettings,
+	getContainersByAppNameMatch,
+	getServiceContainersByAppName,
 	IS_CLOUD,
 	mechanizeDockerContainer,
 	readConfig,
@@ -18,10 +21,12 @@ import {
 	removeMonitoringDirectory,
 	removeService,
 	removeTraefikConfig,
+	resolveEnvironmentOwnership,
 	startService,
 	startServiceRemote,
 	stopService,
 	stopServiceRemote,
+	transitionDeployment,
 	unzipDrop,
 	updateApplication,
 	updateApplicationStatus,
@@ -30,7 +35,10 @@ import {
 	writeConfigRemote,
 } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
-import { canEditDeployGitSource } from "@dokploy/server/services/git-provider";
+import {
+	assertGitSourceAttachmentAccess,
+	canEditDeployGitSource,
+} from "@dokploy/server/services/git-provider";
 import {
 	addNewService,
 	checkServiceAccess,
@@ -38,7 +46,7 @@ import {
 	findMemberByUserId,
 } from "@dokploy/server/services/permission";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { zfd } from "zod-form-data";
@@ -66,7 +74,11 @@ import {
 	apiUpdateApplication,
 	applications,
 	environments,
+	network,
 	projects,
+	registry,
+	server,
+	sshKeys,
 } from "@/server/db/schema";
 import type { DeploymentJob } from "@/server/queues/queue-types";
 import {
@@ -85,17 +97,6 @@ export const applicationRouter = createTRPCRouter({
 				const project = await findProjectById(environment.projectId);
 
 				await checkServiceAccess(ctx, project.projectId, "create");
-
-				const webServerSettings = await getWebServerSettings();
-				if (
-					(IS_CLOUD || webServerSettings?.remoteServersOnly) &&
-					!input.serverId
-				) {
-					throw new TRPCError({
-						code: "UNAUTHORIZED",
-						message: "You need to use a server to create an application",
-					});
-				}
 
 				if (project.organizationId !== ctx.session.activeOrganizationId) {
 					throw new TRPCError({
@@ -235,7 +236,8 @@ export const applicationRouter = createTRPCRouter({
 			}
 
 			const result = await db
-				.delete(applications)
+				.update(applications)
+				.set({ deletedAt: new Date() })
 				.where(eq(applications.applicationId, input.applicationId))
 				.returning();
 
@@ -414,6 +416,9 @@ export const applicationRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.applicationId, {
 				service: ["create"],
 			});
+			await assertGitSourceAttachmentAccess(ctx.session, {
+				githubId: input.githubId,
+			});
 			await updateApplication(input.applicationId, {
 				repository: input.repository,
 				branch: input.branch,
@@ -440,6 +445,9 @@ export const applicationRouter = createTRPCRouter({
 		.mutation(async ({ input, ctx }) => {
 			await checkServicePermissionAndAccess(ctx, input.applicationId, {
 				service: ["create"],
+			});
+			await assertGitSourceAttachmentAccess(ctx.session, {
+				gitlabId: input.gitlabId,
 			});
 			await updateApplication(input.applicationId, {
 				gitlabRepository: input.gitlabRepository,
@@ -469,6 +477,9 @@ export const applicationRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.applicationId, {
 				service: ["create"],
 			});
+			await assertGitSourceAttachmentAccess(ctx.session, {
+				bitbucketId: input.bitbucketId,
+			});
 			await updateApplication(input.applicationId, {
 				bitbucketRepository: input.bitbucketRepository,
 				bitbucketRepositorySlug: input.bitbucketRepositorySlug,
@@ -495,6 +506,9 @@ export const applicationRouter = createTRPCRouter({
 		.mutation(async ({ input, ctx }) => {
 			await checkServicePermissionAndAccess(ctx, input.applicationId, {
 				service: ["create"],
+			});
+			await assertGitSourceAttachmentAccess(ctx.session, {
+				giteaId: input.giteaId,
 			});
 			await updateApplication(input.applicationId, {
 				giteaRepository: input.giteaRepository,
@@ -545,6 +559,18 @@ export const applicationRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.applicationId, {
 				service: ["create"],
 			});
+			if (input.customGitSSHKeyId) {
+				const ownedKey = await db.query.sshKeys.findFirst({
+					where: and(
+						eq(sshKeys.sshKeyId, input.customGitSSHKeyId),
+						eq(sshKeys.organizationId, ctx.session.activeOrganizationId),
+					),
+					columns: { sshKeyId: true },
+				});
+				if (!ownedKey) {
+					throw new TRPCError({ code: "NOT_FOUND", message: "SSH key not found" });
+				}
+			}
 			await updateApplication(input.applicationId, {
 				customGitBranch: input.customGitBranch,
 				customGitBuildPath: input.customGitBuildPath,
@@ -638,7 +664,9 @@ export const applicationRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.applicationId, {
 				service: ["create"],
 			});
-
+			const registryIds = [input.buildRegistryId, input.rollbackRegistryId].filter(
+				(id): id is string => Boolean(id),
+			);
 			if (input.buildServerId) {
 				const accessibleIds = await getAccessibleServerIds(ctx.session);
 				if (!accessibleIds.has(input.buildServerId)) {
@@ -650,8 +678,66 @@ export const applicationRouter = createTRPCRouter({
 			}
 
 			const { applicationId, ...rest } = input;
-			const updateApp = await updateApplication(applicationId, {
-				...rest,
+			const updateApp = await db.transaction(async (transaction) => {
+				const uniqueRegistryIds = [...new Set(registryIds)];
+				if (uniqueRegistryIds.length > 0) {
+					const ownedRegistries = await transaction.query.registry.findMany({
+						where: and(
+							eq(registry.organizationId, ctx.session.activeOrganizationId),
+							inArray(registry.registryId, uniqueRegistryIds),
+						),
+						columns: { registryId: true },
+					});
+					if (ownedRegistries.length !== uniqueRegistryIds.length) {
+						throw new TRPCError({
+							code: "NOT_FOUND",
+							message: "Registry not found",
+						});
+					}
+				}
+
+				const uniqueNetworkIds = [...new Set(input.networkIds ?? [])];
+				if (input.networkIds !== undefined && uniqueNetworkIds.length > 0) {
+					const ownedNetworks = await transaction.query.network.findMany({
+						where: and(
+							eq(network.organizationId, ctx.session.activeOrganizationId),
+							inArray(network.networkId, uniqueNetworkIds),
+						),
+						columns: { networkId: true },
+					});
+					if (ownedNetworks.length !== uniqueNetworkIds.length) {
+						throw new TRPCError({
+							code: "NOT_FOUND",
+							message: "Network not found",
+						});
+					}
+				}
+
+				if (input.buildServerId) {
+					const ownedServer = await transaction.query.server.findFirst({
+						where: and(
+							eq(server.serverId, input.buildServerId),
+							eq(server.organizationId, ctx.session.activeOrganizationId),
+							isNull(server.deletedAt),
+						),
+						columns: { serverId: true },
+					});
+					if (!ownedServer) {
+						throw new TRPCError({
+							code: "NOT_FOUND",
+							message: "Build server not found",
+						});
+					}
+				}
+
+				return updateApplication(
+					applicationId,
+					{ ...rest },
+					{
+						executor: transaction,
+						organizationId: ctx.session.activeOrganizationId,
+					},
+				);
 			});
 
 			if (!updateApp) {
@@ -892,15 +978,27 @@ export const applicationRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.applicationId, {
 				service: ["create"],
 			});
-
-			const updatedApplication = await db
-				.update(applications)
-				.set({
-					environmentId: input.targetEnvironmentId,
-				})
-				.where(eq(applications.applicationId, input.applicationId))
-				.returning()
-				.then((res) => res[0]);
+			const updatedApplication = await db.transaction(async (transaction) => {
+				const ownership = await resolveEnvironmentOwnership(
+					transaction,
+					input.targetEnvironmentId,
+					ctx.session.activeOrganizationId,
+				);
+				return transaction
+					.update(applications)
+					.set(ownership)
+					.where(
+						and(
+							eq(applications.applicationId, input.applicationId),
+							eq(
+								applications.organizationId,
+								ctx.session.activeOrganizationId,
+							),
+						),
+					)
+					.returning()
+					.then((res) => res[0]);
+			});
 
 			if (!updatedApplication) {
 				throw new TRPCError({
@@ -926,20 +1024,32 @@ export const applicationRouter = createTRPCRouter({
 			const application = await findApplicationById(input.applicationId);
 
 			if (IS_CLOUD && application.serverId) {
+				let canonicalDeploymentId: string | null = null;
 				try {
 					await updateApplicationStatus(input.applicationId, "idle");
-
-					if (application.deployments[0]) {
-						await updateDeploymentStatus(
-							application.deployments[0].deploymentId,
-							"done",
-						);
+					const cancellation = await beginDeploymentCancellation({
+						organizationId: ctx.session.activeOrganizationId,
+						applicationId: input.applicationId,
+					});
+					const active = cancellation?.deployment;
+					if (cancellation?.canonicalCancellation) {
+						canonicalDeploymentId = active?.deploymentId ?? null;
 					}
 
 					await cancelDeployment({
 						applicationId: input.applicationId,
 						applicationType: "application",
 					});
+					if (canonicalDeploymentId) {
+						await transitionDeployment({
+							organizationId: ctx.session.activeOrganizationId,
+							deploymentId: canonicalDeploymentId,
+							expectedStatus: "cancelling",
+							nextStatus: "cancelled",
+						});
+					} else if (active?.status === "running") {
+						await updateDeploymentStatus(active.deploymentId, "cancelled");
+					}
 					await audit(ctx, {
 						action: "stop",
 						resourceType: "application",
@@ -951,6 +1061,17 @@ export const applicationRouter = createTRPCRouter({
 						message: "Deployment cancellation requested",
 					};
 				} catch (error) {
+					if (canonicalDeploymentId) {
+						await transitionDeployment({
+							organizationId: ctx.session.activeOrganizationId,
+							deploymentId: canonicalDeploymentId,
+							expectedStatus: "cancelling",
+							nextStatus: "failed",
+							errorCode: "cancel_failed",
+							errorMessage:
+								error instanceof Error ? error.message : "Cancellation failed",
+						});
+					}
 					throw new TRPCError({
 						code: "INTERNAL_SERVER_ERROR",
 						message:
@@ -1132,5 +1253,38 @@ export const applicationRouter = createTRPCRouter({
 				input.search,
 				application.serverId,
 			);
+		}),
+	logContainers: protectedProcedure
+		.input(
+			apiFindOneApplication.extend({
+				runType: z.enum(["native", "swarm"]),
+			}),
+		)
+		.query(async ({ input, ctx }) => {
+			await checkServiceAccess(ctx, input.applicationId, "read");
+			const runtime = await findWorkspaceServiceRuntime(
+				ctx.session.activeOrganizationId,
+				input.applicationId,
+			);
+			if (input.runType === "swarm") {
+				return (
+					await getServiceContainersByAppName(
+						runtime.appName,
+						runtime.serverId ?? undefined,
+					)
+				).map((container) => ({ ...container, status: null }));
+			}
+			return (
+				await getContainersByAppNameMatch(
+					runtime.appName,
+					undefined,
+					runtime.serverId ?? undefined,
+				)
+			).map((container) => ({
+				...container,
+				currentState: null,
+				node: null,
+				error: null,
+			}));
 		}),
 });

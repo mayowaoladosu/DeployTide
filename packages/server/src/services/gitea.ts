@@ -80,13 +80,33 @@ export const findGiteaById = async (giteaId: string) => {
 	}
 };
 
-export const updateGitea = async (giteaId: string, input: Partial<Gitea>) => {
+export const updateGitea = async (
+	giteaId: string,
+	organizationId: string,
+	input: Partial<Gitea>,
+	providerData?: { name: string },
+) => {
 	try {
-		const updateResult = await db
-			.update(gitea)
-			.set(input)
-			.where(eq(gitea.giteaId, giteaId))
-			.returning();
+		const updateResult = await db.transaction(async (transaction) => {
+			const current = await transaction.query.gitea.findFirst({
+				where: eq(gitea.giteaId, giteaId),
+				with: { gitProvider: true },
+			});
+			if (!current || current.gitProvider.organizationId !== organizationId) {
+				throw new TRPCError({ code: "NOT_FOUND", message: "Gitea Provider not found" });
+			}
+			if (providerData) {
+				await transaction
+					.update(gitProvider)
+					.set(providerData)
+					.where(eq(gitProvider.gitProviderId, current.gitProviderId));
+			}
+			return transaction
+				.update(gitea)
+				.set(input)
+				.where(eq(gitea.giteaId, giteaId))
+				.returning();
+		});
 
 		const result = updateResult[0] as Gitea | undefined;
 

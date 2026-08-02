@@ -13,6 +13,7 @@ import { eq } from "drizzle-orm";
 import { quote } from "shell-quote";
 import type { z } from "zod";
 import { validUniqueServerAppName } from "./project";
+import { resolveEnvironmentOwnership } from "./tenancy";
 
 export type Redis = typeof redis.$inferSelect;
 
@@ -28,26 +29,30 @@ export const createRedis = async (input: z.infer<typeof apiCreateRedis>) => {
 		});
 	}
 
-	const newRedis = await db
-		.insert(redis)
-		.values({
-			...input,
-			databasePassword: input.databasePassword
-				? input.databasePassword
-				: generatePassword(),
-			appName,
-		})
-		.returning()
-		.then((value) => value[0]);
-
-	if (!newRedis) {
-		throw new TRPCError({
-			code: "BAD_REQUEST",
-			message: "Error input: Inserting redis database",
-		});
-	}
-
-	return newRedis;
+	return db.transaction(async (transaction) => {
+		const ownership = await resolveEnvironmentOwnership(
+			transaction,
+			input.environmentId,
+		);
+		const [newRedis] = await transaction
+			.insert(redis)
+			.values({
+				...input,
+				...ownership,
+				databasePassword: input.databasePassword
+					? input.databasePassword
+					: generatePassword(),
+				appName,
+			})
+			.returning();
+		if (!newRedis) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "Error input: Inserting redis database",
+			});
+		}
+		return newRedis;
+	});
 };
 
 export const findRedisById = async (redisId: string) => {

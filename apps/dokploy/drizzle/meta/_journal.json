@@ -1240,6 +1240,55 @@
       "when": 1785274179336,
       "tag": "0176_slimy_marten_broadcloak",
       "breakpoints": true
+    },
+    {
+      "idx": 177,
+      "version": "7",
+      "when": 1785664162094,
+      "tag": "0177_special_stick",
+      "breakpoints": true
+    },
+    {
+      "idx": 178,
+      "version": "7",
+      "when": 1785664303391,
+      "tag": "0178_thin_morph",
+      "breakpoints": true
+    },
+    {
+      "idx": 179,
+      "version": "7",
+      "when": 1785666854713,
+      "tag": "0179_slow_rattler",
+      "breakpoints": true
+    },
+    {
+      "idx": 180,
+      "version": "7",
+      "when": 1785684550226,
+      "tag": "0180_aberrant_pandemic",
+      "breakpoints": true
+    },
+    {
+      "idx": 181,
+      "version": "7",
+      "when": 1785687432136,
+      "tag": "0181_pale_jack_power",
+      "breakpoints": true
+    },
+    {
+      "idx": 182,
+      "version": "7",
+      "when": 1785687811977,
+      "tag": "0182_lucky_sally_floyd",
+      "breakpoints": true
+    },
+    {
+      "idx": 183,
+      "version": "7",
+      "when": 1785689568547,
+      "tag": "0183_salty_jocasta",
+      "breakpoints": true
     }
   ]
 }

@@ -1,6 +1,26 @@
 import { db } from "@dokploy/server/db";
-import { webServerSettings } from "@dokploy/server/db/schema";
+import {
+	type MetricsConfig,
+	webServerSettings,
+} from "@dokploy/server/db/schema";
 import { eq } from "drizzle-orm";
+
+const defaultMetricsConfig: MetricsConfig = {
+	server: {
+		type: "Dokploy",
+		refreshRate: 60,
+		port: 4500,
+		token: "",
+		retentionDays: 2,
+		cronJob: "",
+		urlCallback: "",
+		thresholds: { cpu: 0, memory: 0 },
+	},
+	containers: {
+		refreshRate: 60,
+		services: { include: [], exclude: [] },
+	},
+};
 
 /**
  * Get the web server settings (singleton - only one row should exist)
@@ -14,7 +34,7 @@ export const getWebServerSettings = async () => {
 		// Create default settings if none exist
 		const [newSettings] = await db
 			.insert(webServerSettings)
-			.values({})
+			.values({ metricsConfig: defaultMetricsConfig })
 			.returning();
 
 		return newSettings;

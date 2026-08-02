@@ -8,7 +8,6 @@ import {
 	getUserByToken,
 	getWebServerSettings,
 	IS_CLOUD,
-	removeUserById,
 	renderInvitationEmail,
 	sendEmailNotification,
 	sendResendNotification,
@@ -305,10 +304,6 @@ export const userRouter = createTRPCRouter({
 			}),
 		)
 		.mutation(async ({ input, ctx }) => {
-			if (IS_CLOUD) {
-				return true;
-			}
-
 			// Ensure the acting user has admin privileges in the active organization
 			if (ctx.user.role !== "owner" && ctx.user.role !== "admin") {
 				throw new TRPCError({
@@ -359,7 +354,10 @@ export const userRouter = createTRPCRouter({
 				});
 			}
 
-			const result = await removeUserById(input.userId);
+			const [result] = await db
+				.delete(member)
+				.where(eq(member.id, targetMember.id))
+				.returning();
 			await audit(ctx, {
 				action: "delete",
 				resourceType: "user",

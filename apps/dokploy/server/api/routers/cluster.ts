@@ -10,10 +10,10 @@ import { quote } from "shell-quote";
 import { z } from "zod";
 import { audit } from "@/server/api/utils/audit";
 import { getLocalServerIp } from "@/server/wss/terminal";
-import { createTRPCRouter, withPermission } from "../trpc";
+import { createTRPCRouter, operatorProcedure } from "../trpc";
 
 export const clusterRouter = createTRPCRouter({
-	getNodes: withPermission("server", "read")
+	getNodes: operatorProcedure
 		.input(
 			z.object({
 				serverId: z.string().optional(),
@@ -34,7 +34,7 @@ export const clusterRouter = createTRPCRouter({
 			return workers;
 		}),
 
-	removeWorker: withPermission("server", "delete")
+	removeWorker: operatorProcedure
 		.input(
 			z.object({
 				nodeId: z.string(),
@@ -78,7 +78,7 @@ export const clusterRouter = createTRPCRouter({
 			}
 		}),
 
-	addWorker: withPermission("server", "create")
+	addWorker: operatorProcedure
 		.input(
 			z.object({
 				serverId: z.string().optional(),
@@ -112,7 +112,7 @@ export const clusterRouter = createTRPCRouter({
 			};
 		}),
 
-	addManager: withPermission("server", "create")
+	addManager: operatorProcedure
 		.input(
 			z.object({
 				serverId: z.string().optional(),

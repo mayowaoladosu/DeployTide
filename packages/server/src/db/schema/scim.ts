@@ -2,13 +2,14 @@ import { relations } from "drizzle-orm";
 import { pgTable, text } from "drizzle-orm/pg-core";
 import { nanoid } from "nanoid";
 import { organization } from "./account";
+import { encryptedText } from "./utils";
 
 export const scimProvider = pgTable("scim_provider", {
 	id: text("id")
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
 	providerId: text("provider_id").notNull().unique(),
-	scimToken: text("scim_token").notNull().unique(),
+	scimToken: encryptedText("scim_token").notNull(),
 	organizationId: text("organization_id").references(() => organization.id, {
 		onDelete: "cascade",
 	}),

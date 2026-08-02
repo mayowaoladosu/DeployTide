@@ -5,7 +5,7 @@ import { nanoid } from "nanoid";
 import { z } from "zod";
 import { organization } from "./account";
 import { server } from "./server";
-import { generateAppName } from "./utils";
+import { encryptedText, generateAppName } from "./utils";
 
 export const certificates = pgTable("certificate", {
 	certificateId: text("certificateId")
@@ -14,7 +14,7 @@ export const certificates = pgTable("certificate", {
 		.$defaultFn(() => nanoid()),
 	name: text("name").notNull(),
 	certificateData: text("certificateData").notNull(),
-	privateKey: text("privateKey").notNull(),
+	privateKey: encryptedText("privateKey").notNull(),
 	certificatePath: text("certificatePath")
 		.notNull()
 		.$defaultFn(() => generateAppName("certificate"))

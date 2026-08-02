@@ -43,7 +43,7 @@ import {
 } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
 import { TRPCError } from "@trpc/server";
-import { desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { z } from "zod";
 import {
 	createTRPCRouter,
@@ -524,7 +524,10 @@ export const notificationRouter = createTRPCRouter({
 						.select()
 						.from(server)
 						.where(
-							sql`${server.metricsConfig}::jsonb -> 'server' ->> 'token' = ${input.Token}`,
+							and(
+								sql`${server.metricsConfig}::jsonb -> 'server' ->> 'token' = ${input.Token}`,
+								isNull(server.deletedAt),
+							),
 						);
 
 					if (!result?.[0]?.organizationId) {

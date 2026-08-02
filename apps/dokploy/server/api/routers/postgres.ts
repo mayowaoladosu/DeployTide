@@ -18,6 +18,7 @@ import {
 	rebuildDatabase,
 	removePostgresById,
 	removeService,
+	resolveEnvironmentOwnership,
 	startService,
 	startServiceRemote,
 	stopService,
@@ -480,15 +481,27 @@ export const postgresRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.postgresId, {
 				service: ["create"],
 			});
-
-			const updatedPostgres = await db
-				.update(postgresTable)
-				.set({
-					environmentId: input.targetEnvironmentId,
-				})
-				.where(eq(postgresTable.postgresId, input.postgresId))
-				.returning()
-				.then((res) => res[0]);
+			const updatedPostgres = await db.transaction(async (transaction) => {
+				const ownership = await resolveEnvironmentOwnership(
+					transaction,
+					input.targetEnvironmentId,
+					ctx.session.activeOrganizationId,
+				);
+				return transaction
+					.update(postgresTable)
+					.set(ownership)
+					.where(
+						and(
+							eq(postgresTable.postgresId, input.postgresId),
+							eq(
+								postgresTable.organizationId,
+								ctx.session.activeOrganizationId,
+							),
+						),
+					)
+					.returning()
+					.then((res) => res[0]);
+			});
 
 			if (!updatedPostgres) {
 				throw new TRPCError({

@@ -14,6 +14,7 @@ import { eq, getTableColumns } from "drizzle-orm";
 import { quote } from "shell-quote";
 import type { z } from "zod";
 import { validUniqueServerAppName } from "./project";
+import { resolveEnvironmentOwnership } from "./tenancy";
 
 export type Mariadb = typeof mariadb.$inferSelect;
 
@@ -30,29 +31,33 @@ export const createMariadb = async (
 		});
 	}
 
-	const newMariadb = await db
-		.insert(mariadb)
-		.values({
-			...input,
-			databasePassword: input.databasePassword
-				? input.databasePassword
-				: generatePassword(),
-			databaseRootPassword: input.databaseRootPassword
-				? input.databaseRootPassword
-				: generatePassword(),
-			appName,
-		})
-		.returning()
-		.then((value) => value[0]);
-
-	if (!newMariadb) {
-		throw new TRPCError({
-			code: "BAD_REQUEST",
-			message: "Error input: Inserting mariadb database",
-		});
-	}
-
-	return newMariadb;
+	return db.transaction(async (transaction) => {
+		const ownership = await resolveEnvironmentOwnership(
+			transaction,
+			input.environmentId,
+		);
+		const [newMariadb] = await transaction
+			.insert(mariadb)
+			.values({
+				...input,
+				...ownership,
+				databasePassword: input.databasePassword
+					? input.databasePassword
+					: generatePassword(),
+				databaseRootPassword: input.databaseRootPassword
+					? input.databaseRootPassword
+					: generatePassword(),
+				appName,
+			})
+			.returning();
+		if (!newMariadb) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "Error input: Inserting mariadb database",
+			});
+		}
+		return newMariadb;
+	});
 };
 
 // https://github.com/drizzle-team/drizzle-orm/discussions/1483#discussioncomment-7523881

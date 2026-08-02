@@ -4,6 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { organization } from "./account";
+import { encryptedText } from "./utils";
 export const ai = pgTable("ai", {
 	aiId: text("aiId")
 		.notNull()
@@ -11,7 +12,7 @@ export const ai = pgTable("ai", {
 		.$defaultFn(() => nanoid()),
 	name: text("name").notNull(),
 	apiUrl: text("apiUrl").notNull(),
-	apiKey: text("apiKey").notNull(),
+	apiKey: encryptedText("apiKey").notNull(),
 	model: text("model").notNull(),
 	isEnabled: boolean("isEnabled").notNull().default(true),
 	organizationId: text("organizationId")

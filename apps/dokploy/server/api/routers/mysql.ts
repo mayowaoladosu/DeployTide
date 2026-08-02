@@ -17,6 +17,7 @@ import {
 	rebuildDatabase,
 	removeMySqlById,
 	removeService,
+	resolveEnvironmentOwnership,
 	startService,
 	startServiceRemote,
 	stopService,
@@ -477,15 +478,24 @@ export const mysqlRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.mysqlId, {
 				service: ["create"],
 			});
-
-			const updatedMysql = await db
-				.update(mysqlTable)
-				.set({
-					environmentId: input.targetEnvironmentId,
-				})
-				.where(eq(mysqlTable.mysqlId, input.mysqlId))
-				.returning()
-				.then((res) => res[0]);
+			const updatedMysql = await db.transaction(async (transaction) => {
+				const ownership = await resolveEnvironmentOwnership(
+					transaction,
+					input.targetEnvironmentId,
+					ctx.session.activeOrganizationId,
+				);
+				return transaction
+					.update(mysqlTable)
+					.set(ownership)
+					.where(
+						and(
+							eq(mysqlTable.mysqlId, input.mysqlId),
+							eq(mysqlTable.organizationId, ctx.session.activeOrganizationId),
+						),
+					)
+					.returning()
+					.then((res) => res[0]);
+			});
 
 			if (!updatedMysql) {
 				throw new TRPCError({

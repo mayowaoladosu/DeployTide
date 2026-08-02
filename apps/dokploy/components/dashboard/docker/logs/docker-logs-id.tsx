@@ -11,7 +11,6 @@ import React, { useEffect, useRef } from "react";
 import { AlertBlock } from "@/components/shared/alert-block";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { api } from "@/utils/api";
 import { AnalyzeLogs } from "./analyze-logs";
 import { LineCountFilter } from "./line-count-filter";
 import { SinceLogsFilter, type TimeFilter } from "./since-logs-filter";
@@ -55,16 +54,6 @@ export const DockerLogsId: React.FC<Props> = ({
 	runType,
 	serviceId,
 }) => {
-	const { data } = api.docker.getConfig.useQuery(
-		{
-			containerId,
-			serverId: serverId ?? undefined,
-		},
-		{
-			enabled: !!containerId,
-		},
-	);
-
 	const [rawLogs, setRawLogs] = React.useState("");
 	const [filteredLogs, setFilteredLogs] = React.useState<LogLine[]>([]);
 	const [autoScroll, setAutoScroll] = React.useState(true);
@@ -241,7 +230,7 @@ export const DockerLogsId: React.FC<Props> = ({
 		const blob = new Blob([logContent], { type: "text/plain" });
 		const url = URL.createObjectURL(blob);
 		const a = document.createElement("a");
-		const appName = data.Name.replace("/", "") || "app";
+		const appName = serviceId || containerId || "app";
 		const isoDate = new Date().toISOString();
 		a.href = url;
 		a.download = `${appName}-${isoDate.slice(0, 10).replace(/-/g, "")}_${isoDate
@@ -383,7 +372,7 @@ export const DockerLogsId: React.FC<Props> = ({
 								size="sm"
 								className="h-9 sm:w-auto w-full"
 								onClick={handleDownload}
-								disabled={filteredLogs.length === 0 || !data?.Name}
+								disabled={filteredLogs.length === 0}
 								title="Download logs as text file"
 							>
 								<DownloadIcon className="size-4" />

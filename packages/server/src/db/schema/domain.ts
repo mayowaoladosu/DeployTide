@@ -2,19 +2,24 @@ import { relations, sql } from "drizzle-orm";
 import {
 	type AnyPgColumn,
 	boolean,
+	foreignKey,
 	integer,
 	pgEnum,
 	pgTable,
 	serial,
 	text,
+	timestamp,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { domain } from "../validations/domain";
+import { organization } from "./account";
 import { applications } from "./application";
 import { compose } from "./compose";
+import { environments } from "./environment";
 import { previewDeployments } from "./preview-deployments";
+import { projects } from "./project";
 import { certificateType } from "./shared";
 
 export const domainType = pgEnum("domainType", [
@@ -39,6 +44,17 @@ export const domains = pgTable("domain", {
 	createdAt: text("createdAt")
 		.notNull()
 		.$defaultFn(() => new Date().toISOString()),
+	organizationId: text("organizationId").references(() => organization.id, {
+		onDelete: "cascade",
+	}),
+	projectId: text("projectId").references(() => projects.projectId, {
+		onDelete: "cascade",
+	}),
+	environmentId: text("environmentId").references(
+		() => environments.environmentId,
+		{ onDelete: "cascade" },
+	),
+	deletedAt: timestamp("deletedAt", { withTimezone: true }),
 	composeId: text("composeId").references(() => compose.composeId, {
 		onDelete: "cascade",
 	}),
@@ -56,9 +72,36 @@ export const domains = pgTable("domain", {
 	stripPath: boolean("stripPath").notNull().default(false),
 	middlewares: text("middlewares").array().default(sql`ARRAY[]::text[]`),
 	forwardAuthEnabled: boolean("forwardAuthEnabled").notNull().default(false),
-});
+}, (table) => [
+	foreignKey({
+		name: "domain_project_organization_fk",
+		columns: [table.projectId, table.organizationId],
+		foreignColumns: [projects.projectId, projects.organizationId],
+	}).onDelete("cascade"),
+	foreignKey({
+		name: "domain_environment_project_organization_fk",
+		columns: [table.environmentId, table.projectId, table.organizationId],
+		foreignColumns: [
+			environments.environmentId,
+			environments.projectId,
+			environments.organizationId,
+		],
+	}).onDelete("cascade"),
+]);
 
 export const domainsRelations = relations(domains, ({ one }) => ({
+	organization: one(organization, {
+		fields: [domains.organizationId],
+		references: [organization.id],
+	}),
+	project: one(projects, {
+		fields: [domains.projectId],
+		references: [projects.projectId],
+	}),
+	environment: one(environments, {
+		fields: [domains.environmentId],
+		references: [environments.environmentId],
+	}),
 	application: one(applications, {
 		fields: [domains.applicationId],
 		references: [applications.applicationId],

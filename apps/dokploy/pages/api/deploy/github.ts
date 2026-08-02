@@ -11,7 +11,7 @@ import {
 } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
 import { Webhooks } from "@octokit/webhooks";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { NextApiRequest, NextApiResponse } from "next";
 import { applications, compose, github } from "@/server/db/schema";
 import type { DeploymentJob } from "@/server/queues/queue-types";
@@ -125,6 +125,7 @@ export default async function handler(
 					eq(applications.repository, repository),
 					eq(applications.owner, owner),
 					eq(applications.githubId, githubResult.githubId),
+					isNull(applications.deletedAt),
 				),
 			});
 
@@ -164,10 +165,21 @@ export default async function handler(
 					eq(compose.repository, repository),
 					eq(compose.owner, owner),
 					eq(compose.githubId, githubResult.githubId),
+					isNull(compose.deletedAt),
 				),
+				with: {
+					organization: { columns: { deletedAt: true } },
+					environment: { with: { project: true } },
+				},
 			});
+			const activeComposeApps = composeApps.filter(
+				(service) =>
+					!service.organization.deletedAt &&
+					!service.environment.deletedAt &&
+					!service.environment.project.deletedAt,
+			);
 
-			for (const composeApp of composeApps) {
+			for (const composeApp of activeComposeApps) {
 				const jobData: DeploymentJob = {
 					composeId: composeApp.composeId as string,
 					titleLog: deploymentTitle,
@@ -195,7 +207,7 @@ export default async function handler(
 				);
 			}
 
-			const totalApps = apps.length + composeApps.length;
+			const totalApps = apps.length + activeComposeApps.length;
 
 			if (totalApps === 0) {
 				res
@@ -236,6 +248,7 @@ export default async function handler(
 					eq(applications.repository, repository),
 					eq(applications.owner, owner),
 					eq(applications.githubId, githubResult.githubId),
+					isNull(applications.deletedAt),
 				),
 			});
 
@@ -284,10 +297,21 @@ export default async function handler(
 					eq(compose.repository, repository),
 					eq(compose.owner, owner),
 					eq(compose.githubId, githubResult.githubId),
+					isNull(compose.deletedAt),
 				),
+				with: {
+					organization: { columns: { deletedAt: true } },
+					environment: { with: { project: true } },
+				},
 			});
+			const activeComposeApps = composeApps.filter(
+				(service) =>
+					!service.organization.deletedAt &&
+					!service.environment.deletedAt &&
+					!service.environment.project.deletedAt,
+			);
 
-			for (const composeApp of composeApps) {
+			for (const composeApp of activeComposeApps) {
 				const jobData: DeploymentJob = {
 					composeId: composeApp.composeId as string,
 					titleLog: deploymentTitle,
@@ -323,7 +347,7 @@ export default async function handler(
 				);
 			}
 
-			const totalApps = apps.length + composeApps.length;
+			const totalApps = apps.length + activeComposeApps.length;
 			const emptyApps = totalApps === 0;
 
 			if (emptyApps) {
@@ -397,6 +421,7 @@ export default async function handler(
 					eq(applications.isPreviewDeploymentsActive, true),
 					eq(applications.owner, owner),
 					eq(applications.githubId, githubResult.githubId),
+					isNull(applications.deletedAt),
 				),
 				with: {
 					previewDeployments: true,

@@ -17,7 +17,6 @@ import {
 import {
 	Form,
 	FormControl,
-	FormDescription,
 	FormField,
 	FormItem,
 	FormLabel,
@@ -25,7 +24,6 @@ import {
 } from "@/components/ui/form";
 import { Input } from "@/components/ui/input";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
-import { Switch } from "@/components/ui/switch";
 import { getAvatarType, isSolidColorAvatar } from "@/lib/avatar-utils";
 import { generateSHA256Hash, getFallbackAvatarInitials } from "@/lib/utils";
 import { api } from "@/utils/api";
@@ -42,7 +40,6 @@ const profileSchema = z.object({
 	image: z.string().optional(),
 	firstName: z.string().optional(),
 	lastName: z.string().optional(),
-	allowImpersonation: z.boolean().optional().default(false),
 });
 
 type Profile = z.infer<typeof profileSchema>;
@@ -64,7 +61,6 @@ const randomImages = [
 
 export const ProfileForm = () => {
 	const { data, refetch, isPending } = api.user.get.useQuery();
-	const { data: isCloud } = api.settings.isCloud.useQuery();
 
 	const {
 		mutateAsync,
@@ -88,7 +84,6 @@ export const ProfileForm = () => {
 			password: "",
 			image: data?.user?.image || "",
 			currentPassword: "",
-			allowImpersonation: data?.user?.allowImpersonation || false,
 			firstName: data?.user?.firstName || "",
 			lastName: data?.user?.lastName || "",
 		},
@@ -103,7 +98,6 @@ export const ProfileForm = () => {
 					password: form.getValues("password") || "",
 					image: data?.user?.image || "",
 					currentPassword: form.getValues("currentPassword") || "",
-					allowImpersonation: data?.user?.allowImpersonation,
 					firstName: data?.user?.firstName || "",
 					lastName: data?.user?.lastName || "",
 				},
@@ -111,7 +105,6 @@ export const ProfileForm = () => {
 					keepValues: true,
 				},
 			);
-			form.setValue("allowImpersonation", data?.user?.allowImpersonation);
 
 			if (data.user.email) {
 				generateSHA256Hash(data.user.email).then((hash) => {
@@ -128,7 +121,6 @@ export const ProfileForm = () => {
 				password: values.password || undefined,
 				image: values.image,
 				currentPassword: values.currentPassword || undefined,
-				allowImpersonation: values.allowImpersonation,
 				firstName: values.firstName || undefined,
 				lastName: values.lastName || undefined,
 			});
@@ -415,32 +407,6 @@ export const ProfileForm = () => {
 													</FormItem>
 												)}
 											/>
-											{isCloud && (
-												<FormField
-													control={form.control}
-													name="allowImpersonation"
-													render={({ field }) => (
-														<FormItem className="flex flex-row items-center justify-between p-3 mt-4 border rounded-lg shadow-xs">
-															<div className="space-y-0.5">
-																<FormLabel>Allow Impersonation</FormLabel>
-																<FormDescription>
-																	Enable this option to allow Dokploy Cloud
-																	administrators to temporarily access your
-																	account for troubleshooting and support
-																	purposes. This helps them quickly identify and
-																	resolve any issues you may encounter.
-																</FormDescription>
-															</div>
-															<FormControl>
-																<Switch
-																	checked={field.value}
-																	onCheckedChange={field.onChange}
-																/>
-															</FormControl>
-														</FormItem>
-													)}
-												/>
-											)}
 										</div>
 
 										<div className="flex items-center justify-end gap-2">

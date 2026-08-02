@@ -8,7 +8,9 @@
  */
 
 // import { getServerAuthSession } from "@/server/auth";
+import { createHash, timingSafeEqual } from "node:crypto";
 import { db } from "@dokploy/server/db";
+import { organization } from "@dokploy/server/db/schema";
 import type { statements } from "@dokploy/server/lib/access-control";
 import { validateRequest } from "@dokploy/server/lib/auth";
 import { checkPermission } from "@dokploy/server/services/permission";
@@ -16,6 +18,7 @@ import type { OpenApiMeta } from "@dokploy/trpc-openapi";
 import { initTRPC, TRPCError } from "@trpc/server";
 import type { CreateNextContextOptions } from "@trpc/server/adapters/next";
 import type { Session, User } from "better-auth";
+import { and, eq, isNull } from "drizzle-orm";
 import superjson from "superjson";
 import { ZodError } from "zod";
 
@@ -155,9 +158,21 @@ export const publicProcedure = t.procedure;
  *
  * @see https://trpc.io/docs/procedures
  */
-export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
+export const protectedProcedure = t.procedure.use(async ({ ctx, next }) => {
 	if (!ctx.session || !ctx.user) {
 		throw new TRPCError({ code: "UNAUTHORIZED" });
+	}
+	if (ctx.session.activeOrganizationId) {
+		const activeWorkspace = await db.query.organization.findFirst({
+			where: and(
+				eq(organization.id, ctx.session.activeOrganizationId),
+				isNull(organization.deletedAt),
+			),
+			columns: { id: true },
+		});
+		if (!activeWorkspace) {
+			throw new TRPCError({ code: "UNAUTHORIZED" });
+		}
 	}
 	return next({
 		ctx: {
@@ -167,6 +182,31 @@ export const protectedProcedure = t.procedure.use(({ ctx, next }) => {
 			// session: { ...ctx.session, user: ctx.user },
 		},
 	});
+});
+
+export const assertOperatorRequest = (
+	req: CreateNextContextOptions["req"],
+): void => {
+	const expected = process.env.DEPLOYTIDE_OPERATOR_API_TOKEN;
+	const raw = req.headers["x-deploytide-operator-token"];
+	const provided = Array.isArray(raw) ? raw[0] : raw;
+	if (!expected || !provided) {
+		throw new TRPCError({ code: "UNAUTHORIZED" });
+	}
+	const expectedDigest = createHash("sha256").update(expected).digest();
+	const providedDigest = createHash("sha256").update(provided).digest();
+	if (!timingSafeEqual(expectedDigest, providedDigest)) {
+		throw new TRPCError({ code: "UNAUTHORIZED" });
+	}
+};
+
+/**
+ * Compatibility boundary for infrastructure routers retained until Phase 4.
+ * A normal customer session is intentionally insufficient.
+ */
+export const operatorProcedure = protectedProcedure.use(({ ctx, next }) => {
+	assertOperatorRequest(ctx.req);
+	return next();
 });
 
 export const cliProcedure = t.procedure.use(({ ctx, next }) => {

@@ -15,6 +15,7 @@ import { backups } from "./backups";
 import { projects } from "./project";
 import { schedules } from "./schedule";
 import { ssoProvider } from "./sso";
+import { encryptedText } from "./utils";
 /**
  * This is an example of how to use the multi-project schema feature of Drizzle ORM. Use the same
  * database instance for multiple projects.
@@ -58,7 +59,7 @@ export const user = pgTable("user", {
 	enableEnterpriseFeatures: boolean("enableEnterpriseFeatures")
 		.notNull()
 		.default(false),
-	licenseKey: text("licenseKey"),
+	licenseKey: encryptedText("licenseKey"),
 	isValidEnterpriseLicense: boolean("isValidEnterpriseLicense")
 		.notNull()
 		.default(false),
@@ -230,7 +231,7 @@ export const apiReadStatsLogs = z.object({
 		.optional(),
 });
 
-export const apiUpdateUser = createSchema.partial().extend({
+export const apiUpdateUser = z.object({
 	email: z
 		.string()
 		.email("Please enter a valid email address")
@@ -240,4 +241,5 @@ export const apiUpdateUser = createSchema.partial().extend({
 	currentPassword: z.string().optional(),
 	firstName: z.string().optional(),
 	lastName: z.string().optional(),
+	image: z.string().nullable().optional(),
 });

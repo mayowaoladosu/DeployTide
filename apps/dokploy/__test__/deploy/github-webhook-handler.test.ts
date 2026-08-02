@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 
 const mocks = vi.hoisted(() => ({
 	eq: vi.fn((field: string, value: unknown) => ({ field, value })),
+	isNull: vi.fn((field: string) => ({ field, value: null })),
 	and: vi.fn((...conditions: Array<{ field: string; value: unknown }>) => ({
 		conditions,
 	})),
@@ -17,6 +18,7 @@ const mocks = vi.hoisted(() => ({
 vi.mock("drizzle-orm", () => ({
 	eq: mocks.eq,
 	and: mocks.and,
+	isNull: mocks.isNull,
 }));
 
 vi.mock("@/server/db/schema", () => ({
@@ -28,6 +30,7 @@ vi.mock("@/server/db/schema", () => ({
 		repository: "application.repository",
 		owner: "application.owner",
 		githubId: "application.githubId",
+		deletedAt: "application.deletedAt",
 		isPreviewDeploymentsActive: "application.isPreviewDeploymentsActive",
 	},
 	compose: {
@@ -38,6 +41,7 @@ vi.mock("@/server/db/schema", () => ({
 		repository: "compose.repository",
 		owner: "compose.owner",
 		githubId: "compose.githubId",
+		deletedAt: "compose.deletedAt",
 	},
 	github: {
 		githubInstallationId: "github.githubInstallationId",
@@ -241,6 +245,11 @@ describe("GitHub app webhook auto-deploy", () => {
 								composeId: "compose-id",
 								serverId: null,
 								watchPaths: null,
+								organization: { deletedAt: null },
+								environment: {
+									deletedAt: null,
+									project: { deletedAt: null },
+								},
 							},
 						]
 					: [],

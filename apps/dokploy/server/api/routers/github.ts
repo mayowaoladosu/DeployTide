@@ -6,7 +6,6 @@ import {
 	getGithubRepositories,
 	haveGithubRequirements,
 	updateGithub,
-	updateGitProvider,
 } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
 import { TRPCError } from "@trpc/server";
@@ -28,7 +27,13 @@ export const githubRouter = createTRPCRouter({
 		.query(async ({ input, ctx }) => {
 			const github = await findGithubById(input.githubId);
 			await assertGitProviderAccess(ctx.session, github.gitProvider);
-			return github;
+			const {
+				githubClientSecret: _githubClientSecret,
+				githubPrivateKey: _githubPrivateKey,
+				githubWebhookSecret: _githubWebhookSecret,
+				...safeGithub
+			} = github;
+			return safeGithub;
 		}),
 	getGithubRepositories: protectedProcedure
 		.input(apiFindOneGithub)
@@ -94,19 +99,19 @@ export const githubRouter = createTRPCRouter({
 	update: withPermission("gitProviders", "create")
 		.input(apiUpdateGithub)
 		.mutation(async ({ input, ctx }) => {
-			await updateGitProvider(input.gitProviderId, {
-				name: input.name,
-				organizationId: ctx.session.activeOrganizationId,
-			});
-
-			await updateGithub(input.githubId, {
-				...input,
-			});
+			const github = await findGithubById(input.githubId);
+			await assertGitProviderAccess(ctx.session, github.gitProvider);
+			await updateGithub(
+				input.githubId,
+				ctx.session.activeOrganizationId,
+				{ githubAppName: input.githubAppName },
+				{ name: input.name },
+			);
 
 			await audit(ctx, {
 				action: "update",
 				resourceType: "gitProvider",
-				resourceId: input.gitProviderId,
+				resourceId: github.gitProviderId,
 				resourceName: input.name,
 			});
 		}),

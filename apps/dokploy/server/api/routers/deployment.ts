@@ -5,11 +5,15 @@ import {
 	findAllDeploymentsByComposeId,
 	findAllDeploymentsByServerId,
 	findAllDeploymentsCentralized,
+	findBackupById,
 	findDeploymentById,
+	findPreviewDeploymentById,
 	findScheduleById,
+	findVolumeBackupById,
 	IS_CLOUD,
 	removeDeployment,
 	resolveServicePath,
+	transitionDeployment,
 	updateDeploymentStatus,
 } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
@@ -18,8 +22,9 @@ import {
 	findMemberByUserId,
 } from "@dokploy/server/services/permission";
 import { findServerById } from "@dokploy/server/services/server";
+import { assertWorkspaceResource } from "@dokploy/server/services/tenancy";
 import { TRPCError } from "@trpc/server";
-import { desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { audit } from "@/server/api/utils/audit";
 import {
@@ -32,7 +37,126 @@ import {
 } from "@/server/db/schema";
 import { myQueue } from "@/server/queues/queueSetup";
 import { fetchDeployApiJobs, type QueueJobRow } from "@/server/utils/deploy";
-import { createTRPCRouter, protectedProcedure, withPermission } from "../trpc";
+import {
+	assertOperatorRequest,
+	createTRPCRouter,
+	operatorProcedure,
+	protectedProcedure,
+	withPermission,
+} from "../trpc";
+
+type DeploymentPermissionContext = Parameters<
+	typeof checkServicePermissionAndAccess
+>[0] & { req: Parameters<typeof assertOperatorRequest>[0] };
+type DeploymentRecord = Awaited<ReturnType<typeof findDeploymentById>>;
+
+const authorizeServerTarget = async (
+	ctx: DeploymentPermissionContext,
+	serverId: string,
+) => {
+	assertOperatorRequest(ctx.req);
+	const targetServer = await findServerById(serverId);
+	if (targetServer.organizationId !== ctx.session.activeOrganizationId) {
+		throw new TRPCError({ code: "NOT_FOUND", message: "Server not found" });
+	}
+};
+
+const authorizeServiceTarget = async (
+	ctx: DeploymentPermissionContext,
+	serviceId: string,
+	action: "read" | "cancel",
+) => {
+	await checkServicePermissionAndAccess(ctx, serviceId, {
+		deployment: [action],
+	});
+};
+
+const authorizeBackupTarget = async (
+	ctx: DeploymentPermissionContext,
+	backupId: string,
+	action: "read" | "cancel",
+) => {
+	const backup = await findBackupById(backupId);
+	const serviceId =
+		backup.composeId ||
+		backup.postgresId ||
+		backup.mysqlId ||
+		backup.mariadbId ||
+		backup.mongoId ||
+		backup.libsqlId;
+	if (!serviceId) {
+		throw new TRPCError({ code: "FORBIDDEN", message: "Backup has no owner" });
+	}
+	await authorizeServiceTarget(ctx, serviceId, action);
+};
+
+const authorizeVolumeBackupTarget = async (
+	ctx: DeploymentPermissionContext,
+	volumeBackupId: string,
+	action: "read" | "cancel",
+) => {
+	const backup = await findVolumeBackupById(volumeBackupId);
+	const serviceId =
+		backup.applicationId ||
+		backup.composeId ||
+		backup.postgresId ||
+		backup.mysqlId ||
+		backup.mariadbId ||
+		backup.mongoId ||
+		backup.redisId ||
+		backup.libsqlId;
+	if (!serviceId) {
+		throw new TRPCError({ code: "FORBIDDEN", message: "Backup has no owner" });
+	}
+	await authorizeServiceTarget(ctx, serviceId, action);
+};
+
+const authorizeScheduleTarget = async (
+	ctx: DeploymentPermissionContext,
+	scheduleId: string,
+	action: "read" | "cancel",
+) => {
+	const schedule = await findScheduleById(scheduleId);
+	const serviceId = schedule.applicationId || schedule.composeId;
+	if (serviceId) {
+		await authorizeServiceTarget(ctx, serviceId, action);
+		return;
+	}
+	if (schedule.serverId) {
+		await authorizeServerTarget(ctx, schedule.serverId);
+		return;
+	}
+	throw new TRPCError({ code: "FORBIDDEN", message: "Schedule has no owner" });
+};
+
+const authorizeDeploymentTarget = async (
+	ctx: DeploymentPermissionContext,
+	deployment: DeploymentRecord,
+	action: "read" | "cancel",
+) => {
+	const serviceId = deployment.applicationId || deployment.composeId;
+	if (serviceId) return authorizeServiceTarget(ctx, serviceId, action);
+	if (deployment.previewDeploymentId) {
+		const preview = await findPreviewDeploymentById(
+			deployment.previewDeploymentId,
+		);
+		return authorizeServiceTarget(ctx, preview.applicationId, action);
+	}
+	if (deployment.backupId) {
+		return authorizeBackupTarget(ctx, deployment.backupId, action);
+	}
+	if (deployment.volumeBackupId) {
+		return authorizeVolumeBackupTarget(ctx, deployment.volumeBackupId, action);
+	}
+	if (deployment.scheduleId) {
+		return authorizeScheduleTarget(ctx, deployment.scheduleId, action);
+	}
+	const directServerId = deployment.serverId || deployment.buildServerId;
+	if (directServerId) {
+		return authorizeServerTarget(ctx, directServerId);
+	}
+	throw new TRPCError({ code: "FORBIDDEN", message: "Deployment has no owner" });
+};
 
 export const deploymentRouter = createTRPCRouter({
 	all: protectedProcedure
@@ -52,7 +176,7 @@ export const deploymentRouter = createTRPCRouter({
 			});
 			return await findAllDeploymentsByComposeId(input.composeId);
 		}),
-	allByServer: withPermission("deployment", "read")
+	allByServer: operatorProcedure
 		.input(apiFindAllByServer)
 		.query(async ({ input, ctx }) => {
 			const targetServer = await findServerById(input.serverId);
@@ -84,7 +208,10 @@ export const deploymentRouter = createTRPCRouter({
 
 		if (IS_CLOUD) {
 			const servers = await db.query.server.findMany({
-				where: eq(server.organizationId, orgId),
+				where: and(
+					eq(server.organizationId, orgId),
+					isNull(server.deletedAt),
+				),
 				columns: { serverId: true },
 			});
 			const serverRowsArrays = await Promise.all(
@@ -127,31 +254,34 @@ export const deploymentRouter = createTRPCRouter({
 	allByType: protectedProcedure
 		.input(apiFindAllByType)
 		.query(async ({ input, ctx }) => {
-			if (input.type === "schedule") {
-				const schedule = await findScheduleById(input.id);
-				const serviceId = schedule.applicationId || schedule.composeId;
-				if (serviceId) {
-					await checkServicePermissionAndAccess(ctx, serviceId, {
-						deployment: ["read"],
-					});
-				} else if (schedule.serverId) {
-					const targetServer = await findServerById(schedule.serverId);
-					if (
-						targetServer.organizationId !== ctx.session.activeOrganizationId
-					) {
-						throw new TRPCError({
-							code: "UNAUTHORIZED",
-							message: "You don't have access to this schedule.",
-						});
-					}
+			switch (input.type) {
+				case "application":
+				case "compose":
+					await authorizeServiceTarget(ctx, input.id, "read");
+					break;
+				case "previewDeployment": {
+					const preview = await findPreviewDeploymentById(input.id);
+					await authorizeServiceTarget(ctx, preview.applicationId, "read");
+					break;
 				}
-			} else {
-				await checkServicePermissionAndAccess(ctx, input.id, {
-					deployment: ["read"],
-				});
+				case "schedule":
+					await authorizeScheduleTarget(ctx, input.id, "read");
+					break;
+				case "backup":
+					await authorizeBackupTarget(ctx, input.id, "read");
+					break;
+				case "volumeBackup":
+					await authorizeVolumeBackupTarget(ctx, input.id, "read");
+					break;
+				case "server":
+					await authorizeServerTarget(ctx, input.id);
+					break;
 			}
 			const deploymentsList = await db.query.deployments.findMany({
-				where: eq(deployments[`${input.type}Id`], input.id),
+				where: and(
+					eq(deployments[`${input.type}Id`], input.id),
+					eq(deployments.organizationId, ctx.session.activeOrganizationId),
+				),
 				orderBy: desc(deployments.createdAt),
 				with: {
 					rollback: true,
@@ -167,20 +297,12 @@ export const deploymentRouter = createTRPCRouter({
 		)
 		.mutation(async ({ input, ctx }) => {
 			const deployment = await findDeploymentById(input.deploymentId);
-			const serviceId = deployment.applicationId || deployment.composeId;
-			if (serviceId) {
-				await checkServicePermissionAndAccess(ctx, serviceId, {
-					deployment: ["cancel"],
-				});
-			} else if (deployment.schedule?.serverId) {
-				const targetServer = await findServerById(deployment.schedule.serverId);
-				if (targetServer.organizationId !== ctx.session.activeOrganizationId) {
-					throw new TRPCError({
-						code: "UNAUTHORIZED",
-						message: "You don't have access to this deployment.",
-					});
-				}
-			}
+			assertWorkspaceResource(
+				ctx.session.activeOrganizationId,
+				deployment,
+				"Deployment",
+			);
+			await authorizeDeploymentTarget(ctx, deployment, "cancel");
 
 			if (!deployment.pid) {
 				throw new TRPCError({
@@ -188,15 +310,69 @@ export const deploymentRouter = createTRPCRouter({
 					message: "Deployment is not running",
 				});
 			}
-
-			const command = `kill -9 ${deployment.pid}`;
-			if (deployment.schedule?.serverId) {
-				await execAsyncRemote(deployment.schedule.serverId, command);
-			} else {
-				await execAsync(command);
+			if (!/^\d+$/.test(deployment.pid)) {
+				throw new TRPCError({
+					code: "BAD_REQUEST",
+					message: "Deployment process identifier is invalid",
+				});
+			}
+			if (
+				!deployment.status ||
+				!["running", "preparing", "building", "deploying", "checking"].includes(
+					deployment.status,
+				)
+			) {
+				throw new TRPCError({
+					code: "CONFLICT",
+					message: "Only an active deployment can be cancelled",
+				});
+			}
+			const legacyRunning = deployment.status === "running";
+			if (!legacyRunning) {
+				await transitionDeployment({
+					organizationId: ctx.session.activeOrganizationId,
+					deploymentId: deployment.deploymentId,
+					expectedStatus: deployment.status as
+						| "preparing"
+						| "building"
+						| "deploying"
+						| "checking",
+					nextStatus: "cancelling",
+				});
 			}
 
-			await updateDeploymentStatus(deployment.deploymentId, "error");
+			try {
+				const command = `kill -9 ${deployment.pid}`;
+				if (deployment.schedule?.serverId) {
+					await execAsyncRemote(deployment.schedule.serverId, command);
+				} else {
+					await execAsync(command);
+				}
+				if (legacyRunning) {
+					await updateDeploymentStatus(deployment.deploymentId, "cancelled");
+				} else {
+					await transitionDeployment({
+						organizationId: ctx.session.activeOrganizationId,
+						deploymentId: deployment.deploymentId,
+						expectedStatus: "cancelling",
+						nextStatus: "cancelled",
+					});
+				}
+			} catch (error) {
+				if (!legacyRunning) {
+					await transitionDeployment({
+						organizationId: ctx.session.activeOrganizationId,
+						deploymentId: deployment.deploymentId,
+						expectedStatus: "cancelling",
+						nextStatus: "failed",
+						errorCode: "cancel_failed",
+						errorMessage:
+							error instanceof Error ? error.message : "Cancellation failed",
+					});
+				}
+				throw error;
+			}
+
 			await audit(ctx, {
 				action: "cancel",
 				resourceType: "deployment",
@@ -212,21 +388,16 @@ export const deploymentRouter = createTRPCRouter({
 		)
 		.mutation(async ({ input, ctx }) => {
 			const deployment = await findDeploymentById(input.deploymentId);
-			const serviceId = deployment.applicationId || deployment.composeId;
-			if (serviceId) {
-				await checkServicePermissionAndAccess(ctx, serviceId, {
-					deployment: ["cancel"],
-				});
-			} else if (deployment.schedule?.serverId) {
-				const targetServer = await findServerById(deployment.schedule.serverId);
-				if (targetServer.organizationId !== ctx.session.activeOrganizationId) {
-					throw new TRPCError({
-						code: "UNAUTHORIZED",
-						message: "You don't have access to this deployment.",
-					});
-				}
-			}
-			const result = await removeDeployment(input.deploymentId);
+			assertWorkspaceResource(
+				ctx.session.activeOrganizationId,
+				deployment,
+				"Deployment",
+			);
+			await authorizeDeploymentTarget(ctx, deployment, "cancel");
+			const result = await removeDeployment(
+				input.deploymentId,
+				ctx.session.activeOrganizationId,
+			);
 			await audit(ctx, {
 				action: "delete",
 				resourceType: "deployment",
@@ -244,20 +415,12 @@ export const deploymentRouter = createTRPCRouter({
 		)
 		.query(async ({ input, ctx }) => {
 			const deployment = await findDeploymentById(input.deploymentId);
-			const serviceId = deployment.applicationId || deployment.composeId;
-			if (serviceId) {
-				await checkServicePermissionAndAccess(ctx, serviceId, {
-					deployment: ["read"],
-				});
-			} else if (deployment.schedule?.serverId) {
-				const targetServer = await findServerById(deployment.schedule.serverId);
-				if (targetServer.organizationId !== ctx.session.activeOrganizationId) {
-					throw new TRPCError({
-						code: "UNAUTHORIZED",
-						message: "You don't have access to this deployment.",
-					});
-				}
-			}
+			assertWorkspaceResource(
+				ctx.session.activeOrganizationId,
+				deployment,
+				"Deployment",
+			);
+			await authorizeDeploymentTarget(ctx, deployment, "read");
 
 			if (!deployment.logPath) {
 				return "";

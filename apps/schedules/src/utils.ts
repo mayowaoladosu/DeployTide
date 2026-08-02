@@ -24,6 +24,7 @@ import {
 	server,
 	volumeBackups,
 } from "@dokploy/server/db";
+import { isNull } from "drizzle-orm";
 import { logger } from "./logger.js";
 import { scheduleJob } from "./queue.js";
 import type { QueueJob } from "./schema.js";
@@ -130,6 +131,7 @@ export const initializeJobs = async () => {
 		where: and(
 			eq(server.enableDockerCleanup, true),
 			eq(server.serverStatus, "active"),
+			isNull(server.deletedAt),
 		),
 	});
 

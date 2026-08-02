@@ -13,6 +13,7 @@ import { projects } from "./project";
 import { server } from "./server";
 import { ssoProvider } from "./sso";
 import { user } from "./user";
+import { encryptedText } from "./utils";
 
 export const account = pgTable("account", {
 	id: text("id")
@@ -25,9 +26,9 @@ export const account = pgTable("account", {
 	userId: text("user_id")
 		.notNull()
 		.references(() => user.id, { onDelete: "cascade" }),
-	accessToken: text("access_token"),
-	refreshToken: text("refresh_token"),
-	idToken: text("id_token"),
+	accessToken: encryptedText("access_token"),
+	refreshToken: encryptedText("refresh_token"),
+	idToken: encryptedText("id_token"),
 	accessTokenExpiresAt: timestamp("access_token_expires_at"),
 	refreshTokenExpiresAt: timestamp("refresh_token_expires_at"),
 	scope: text("scope"),
@@ -35,9 +36,9 @@ export const account = pgTable("account", {
 	is2FAEnabled: boolean("is2FAEnabled").notNull().default(false),
 	createdAt: timestamp("created_at").notNull(),
 	updatedAt: timestamp("updated_at").notNull(),
-	resetPasswordToken: text("resetPasswordToken"),
+	resetPasswordToken: encryptedText("resetPasswordToken"),
 	resetPasswordExpiresAt: text("resetPasswordExpiresAt"),
-	confirmationToken: text("confirmationToken"),
+	confirmationToken: encryptedText("confirmationToken"),
 	confirmationExpiresAt: text("confirmationExpiresAt"),
 });
 
@@ -65,10 +66,11 @@ export const organization = pgTable("organization", {
 	slug: text("slug").unique(),
 	logo: text("logo"),
 	createdAt: timestamp("created_at").notNull(),
+	deletedAt: timestamp("deleted_at", { withTimezone: true }),
 	metadata: text("metadata"),
 	ownerId: text("owner_id")
 		.notNull()
-		.references(() => user.id, { onDelete: "cascade" }),
+		.references(() => user.id, { onDelete: "restrict" }),
 });
 
 export const organizationRole = pgTable(
@@ -211,8 +213,8 @@ export const invitationRelations = relations(invitation, ({ one }) => ({
 
 export const twoFactor = pgTable("two_factor", {
 	id: text("id").primaryKey(),
-	secret: text("secret").notNull(),
-	backupCodes: text("backup_codes").notNull(),
+	secret: encryptedText("secret").notNull(),
+	backupCodes: encryptedText("backup_codes").notNull(),
 	userId: text("user_id")
 		.notNull()
 		.references(() => user.id, { onDelete: "cascade" }),

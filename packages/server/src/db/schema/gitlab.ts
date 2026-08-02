@@ -3,6 +3,7 @@ import { integer, pgTable, text } from "drizzle-orm/pg-core";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { gitProvider } from "./git-provider";
+import { encryptedText } from "./utils";
 
 export const gitlab = pgTable("gitlab", {
 	gitlabId: text("gitlabId")
@@ -13,9 +14,9 @@ export const gitlab = pgTable("gitlab", {
 	gitlabInternalUrl: text("gitlabInternalUrl"),
 	applicationId: text("application_id"),
 	redirectUri: text("redirect_uri"),
-	secret: text("secret"),
-	accessToken: text("access_token"),
-	refreshToken: text("refresh_token"),
+	secret: encryptedText("secret"),
+	accessToken: encryptedText("access_token"),
+	refreshToken: encryptedText("refresh_token"),
 	groupName: text("group_name"),
 	expiresAt: integer("expires_at"),
 	gitProviderId: text("gitProviderId")

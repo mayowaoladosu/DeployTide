@@ -4,6 +4,7 @@ import {
 	rollback,
 } from "@dokploy/server";
 import { checkServicePermissionAndAccess } from "@dokploy/server/services/permission";
+import { assertWorkspaceResource } from "@dokploy/server/services/tenancy";
 import { TRPCError } from "@trpc/server";
 import { audit } from "@/server/api/utils/audit";
 import { apiFindOneRollback } from "@/server/db/schema";
@@ -15,6 +16,11 @@ export const rollbackRouter = createTRPCRouter({
 		.mutation(async ({ input, ctx }) => {
 			try {
 				const rb = await findRollbackById(input.rollbackId);
+				assertWorkspaceResource(
+					ctx.session.activeOrganizationId,
+					rb,
+					"Rollback",
+				);
 				const serviceId = rb.deployment.applicationId;
 				if (serviceId) {
 					await checkServicePermissionAndAccess(ctx, serviceId, {
@@ -44,6 +50,11 @@ export const rollbackRouter = createTRPCRouter({
 		.mutation(async ({ input, ctx }) => {
 			try {
 				const rb = await findRollbackById(input.rollbackId);
+				assertWorkspaceResource(
+					ctx.session.activeOrganizationId,
+					rb,
+					"Rollback",
+				);
 				const serviceId = rb.deployment.applicationId;
 				if (serviceId) {
 					await checkServicePermissionAndAccess(ctx, serviceId, {

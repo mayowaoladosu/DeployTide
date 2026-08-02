@@ -83,11 +83,15 @@ export const refreshGiteaToken = async (giteaProviderId: string) => {
 		const expiresAt = Date.now() + (expires_in || 3600) * 1000;
 		const expiresAtSeconds = Math.floor(expiresAt / 1000);
 
-		await updateGitea(giteaProviderId, {
+		await updateGitea(
+			giteaProviderId,
+			giteaProvider.gitProvider.organizationId,
+			{
 			accessToken: access_token,
 			refreshToken: refresh_token || giteaProvider.refreshToken,
 			expiresAt: expiresAtSeconds,
-		});
+			},
+		);
 
 		return access_token;
 	} catch (error) {
@@ -254,7 +258,7 @@ export const testGiteaConnection = async (input: { giteaId: string }) => {
 			page++;
 		}
 
-		await updateGitea(giteaId, {
+		await updateGitea(giteaId, provider.gitProvider.organizationId, {
 			lastAuthenticatedAt: Math.floor(Date.now() / 1000),
 		});
 

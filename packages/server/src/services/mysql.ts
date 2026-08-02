@@ -14,6 +14,7 @@ import { eq, getTableColumns } from "drizzle-orm";
 import { quote } from "shell-quote";
 import type { z } from "zod";
 import { validUniqueServerAppName } from "./project";
+import { resolveEnvironmentOwnership } from "./tenancy";
 
 export type MySql = typeof mysql.$inferSelect;
 
@@ -28,29 +29,33 @@ export const createMysql = async (input: z.infer<typeof apiCreateMySql>) => {
 		});
 	}
 
-	const newMysql = await db
-		.insert(mysql)
-		.values({
-			...input,
-			databasePassword: input.databasePassword
-				? input.databasePassword
-				: generatePassword(),
-			databaseRootPassword: input.databaseRootPassword
-				? input.databaseRootPassword
-				: generatePassword(),
-			appName,
-		})
-		.returning()
-		.then((value) => value[0]);
-
-	if (!newMysql) {
-		throw new TRPCError({
-			code: "BAD_REQUEST",
-			message: "Error input: Inserting mysql database",
-		});
-	}
-
-	return newMysql;
+	return db.transaction(async (transaction) => {
+		const ownership = await resolveEnvironmentOwnership(
+			transaction,
+			input.environmentId,
+		);
+		const [newMysql] = await transaction
+			.insert(mysql)
+			.values({
+				...input,
+				...ownership,
+				databasePassword: input.databasePassword
+					? input.databasePassword
+					: generatePassword(),
+				databaseRootPassword: input.databaseRootPassword
+					? input.databaseRootPassword
+					: generatePassword(),
+				appName,
+			})
+			.returning();
+		if (!newMysql) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "Error input: Inserting mysql database",
+			});
+		}
+		return newMysql;
+	});
 };
 
 // https://github.com/drizzle-team/drizzle-orm/discussions/1483#discussioncomment-7523881

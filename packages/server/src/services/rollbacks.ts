@@ -1,5 +1,5 @@
 import type { CreateServiceOptions } from "dockerode";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { z } from "zod";
 import { db } from "../db";
 import {
@@ -32,11 +32,26 @@ import {
 export const createRollback = async (
 	input: z.infer<typeof createRollbackSchema>,
 ) => {
+	const deployment = await findDeploymentById(input.deploymentId);
+	if (
+		!deployment.applicationId ||
+		!deployment.organizationId ||
+		!deployment.projectId ||
+		!deployment.environmentId
+	) {
+		throw new Error("Deployment has no canonical application ownership");
+	}
 	return await db.transaction(async (tx) => {
-		const { fullContext, ...other } = input;
 		const rollback = await tx
 			.insert(rollbacks)
-			.values(other)
+			.values({
+				deploymentId: input.deploymentId,
+				image: input.image,
+				organizationId: deployment.organizationId,
+				projectId: deployment.projectId,
+				environmentId: deployment.environmentId,
+				fullContext: null,
+			})
 			.returning()
 			.then((res) => res[0]);
 
@@ -45,44 +60,11 @@ export const createRollback = async (
 		}
 
 		const tagImage = `${input.appName}:v${rollback.version}`;
-		const deployment = await findDeploymentById(rollback.deploymentId);
-
-		if (!deployment?.applicationId) {
-			throw new Error("Deployment not found");
-		}
-
-		const {
-			deployments: _,
-			bitbucket,
-			github,
-			gitlab,
-			gitea,
-			...rest
-		} = await findApplicationById(deployment.applicationId);
-
-		const registry = rest.registryId
-			? await findRegistryByIdWithCredentials(rest.registryId)
-			: rest.registry;
-		const buildRegistry = rest.buildRegistryId
-			? await findRegistryByIdWithCredentials(rest.buildRegistryId)
-			: rest.buildRegistry;
-		const rollbackRegistry = rest.rollbackRegistryId
-			? await findRegistryByIdWithCredentials(rest.rollbackRegistryId)
-			: rest.rollbackRegistry;
-
-		const fullContextWithCredentials = {
-			...rest,
-			registry,
-			buildRegistry,
-			rollbackRegistry,
-		};
 
 		await tx
 			.update(rollbacks)
 			.set({
 				image: tagImage,
-				// eslint-disable-next-line @typescript-eslint/no-explicit-any
-				fullContext: fullContextWithCredentials as any,
 			})
 			.where(eq(rollbacks.rollbackId, rollback.rollbackId));
 
@@ -104,7 +86,10 @@ export const createRollback = async (
 
 export const findRollbackById = async (rollbackId: string) => {
 	const result = await db.query.rollbacks.findFirst({
-		where: eq(rollbacks.rollbackId, rollbackId),
+		where: and(
+			eq(rollbacks.rollbackId, rollbackId),
+			isNull(rollbacks.deletedAt),
+		),
 		with: {
 			deployment: true,
 		},
@@ -145,15 +130,20 @@ export const removeRollbackById = async (rollbackId: string) => {
 			const application = await findApplicationById(deployment.applicationId);
 			await deleteRollbackImage(rollback.image, application.serverId);
 
-			await db
-				.delete(rollbacks)
-				.where(eq(rollbacks.rollbackId, rollbackId))
-				.returning()
-				.then((res) => res[0]);
 		} catch (error) {
 			console.error(error);
 		}
 	}
+	await db
+		.update(rollbacks)
+		.set({ deletedAt: new Date() })
+		.where(
+			and(
+				eq(rollbacks.rollbackId, rollbackId),
+				isNull(rollbacks.deletedAt),
+			),
+		)
+		.returning();
 
 	return rollback;
 };
@@ -168,15 +158,15 @@ export const rollback = async (rollbackId: string) => {
 	}
 
 	const application = await findApplicationById(deployment.applicationId);
-
-	if (!result.fullContext) {
-		throw new Error("Rollback context not found");
-	}
+	const rollbackRegistry = application.rollbackRegistryId
+		? await findRegistryByIdWithCredentials(application.rollbackRegistryId)
+		: null;
+	const runtimeContext = { ...application, rollbackRegistry };
 	await rollbackApplication(
 		application.appName,
 		result.image || "",
 		application.serverId,
-		result.fullContext,
+		runtimeContext,
 	);
 };
 

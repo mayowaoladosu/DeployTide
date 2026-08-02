@@ -27,6 +27,7 @@ import {
 	findProjectById,
 	findRedisById,
 	findUserById,
+	findWorkspaceProject,
 	IS_CLOUD,
 	updateProjectById,
 } from "@dokploy/server";
@@ -39,7 +40,7 @@ import {
 	findMemberByUserId,
 } from "@dokploy/server/services/permission";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, isNull, or, sql } from "drizzle-orm";
 import type { AnyPgColumn } from "drizzle-orm/pg-core";
 import { z } from "zod";
 import {
@@ -125,14 +126,19 @@ export const projectRouter = createTRPCRouter({
 					where: and(
 						eq(projects.projectId, input.projectId),
 						eq(projects.organizationId, ctx.session.activeOrganizationId),
+						isNull(projects.deletedAt),
 					),
 					with: {
 						environments: {
+							where: isNull(environments.deletedAt),
 							with: {
 								applications: {
-									where: buildServiceFilter(
-										applications.applicationId,
-										accessedServices,
+									where: and(
+										buildServiceFilter(
+											applications.applicationId,
+											accessedServices,
+										),
+										isNull(applications.deletedAt),
 									),
 								},
 								compose: {
@@ -183,15 +189,11 @@ export const projectRouter = createTRPCRouter({
 				}
 				return project;
 			}
-			const project = await findProjectById(input.projectId);
-
-			if (project.organizationId !== ctx.session.activeOrganizationId) {
-				throw new TRPCError({
-					code: "UNAUTHORIZED",
-					message: "You are not authorized to access this project",
-				});
-			}
-			return project;
+			await findWorkspaceProject(
+				ctx.session.activeOrganizationId,
+				input.projectId,
+			);
+			return findProjectById(input.projectId);
 		}),
 	all: protectedProcedure.query(async ({ ctx }) => {
 		if (ctx.user.role !== "owner" && ctx.user.role !== "admin") {
@@ -217,15 +219,19 @@ export const projectRouter = createTRPCRouter({
 						sql`, `,
 					)})`,
 					eq(projects.organizationId, ctx.session.activeOrganizationId),
+						isNull(projects.deletedAt),
 				),
 				with: {
 					environments: {
-						where: environmentFilter,
+						where: and(environmentFilter, isNull(environments.deletedAt)),
 						with: {
 							applications: {
-								where: buildServiceFilter(
-									applications.applicationId,
-									accessedServices,
+								where: and(
+									buildServiceFilter(
+										applications.applicationId,
+										accessedServices,
+									),
+									isNull(applications.deletedAt),
 								),
 								columns: {
 									applicationId: true,
@@ -312,8 +318,10 @@ export const projectRouter = createTRPCRouter({
 		return await db.query.projects.findMany({
 			with: {
 				environments: {
+					where: isNull(environments.deletedAt),
 					with: {
 						applications: {
+							where: isNull(applications.deletedAt),
 							columns: {
 								applicationId: true,
 								name: true,
@@ -370,7 +378,10 @@ export const projectRouter = createTRPCRouter({
 					},
 				},
 			},
-			where: eq(projects.organizationId, ctx.session.activeOrganizationId),
+			where: and(
+				eq(projects.organizationId, ctx.session.activeOrganizationId),
+				isNull(projects.deletedAt),
+			),
 			orderBy: desc(projects.createdAt),
 		});
 	}),
@@ -378,7 +389,10 @@ export const projectRouter = createTRPCRouter({
 	allForPermissions: withPermission("member", "update").query(
 		async ({ ctx }) => {
 			return await db.query.projects.findMany({
-				where: eq(projects.organizationId, ctx.session.activeOrganizationId),
+				where: and(
+					eq(projects.organizationId, ctx.session.activeOrganizationId),
+					isNull(projects.deletedAt),
+				),
 				orderBy: desc(projects.createdAt),
 				columns: {
 					projectId: true,
@@ -386,6 +400,7 @@ export const projectRouter = createTRPCRouter({
 				},
 				with: {
 					environments: {
+						where: isNull(environments.deletedAt),
 						columns: {
 							environmentId: true,
 							name: true,
@@ -393,6 +408,7 @@ export const projectRouter = createTRPCRouter({
 						},
 						with: {
 							applications: {
+								where: isNull(applications.deletedAt),
 								columns: {
 									applicationId: true,
 									appName: true,
@@ -517,23 +533,30 @@ export const projectRouter = createTRPCRouter({
 		}
 
 		const projectIdFilter = isPrivileged
-			? eq(projects.organizationId, ctx.session.activeOrganizationId)
+			? and(
+					eq(projects.organizationId, ctx.session.activeOrganizationId),
+					isNull(projects.deletedAt),
+				)
 			: and(
 					sql`${projects.projectId} IN (${sql.join(
 						accessedProjects.map((id) => sql`${id}`),
 						sql`, `,
 					)})`,
 					eq(projects.organizationId, ctx.session.activeOrganizationId),
+					isNull(projects.deletedAt),
 				);
 
 		const environmentFilter = isPrivileged
-			? undefined
+			? isNull(environments.deletedAt)
 			: accessedEnvironments.length === 0
 				? sql`false`
-				: sql`${environments.environmentId} IN (${sql.join(
-						accessedEnvironments.map((envId) => sql`${envId}`),
-						sql`, `,
-					)})`;
+				: and(
+						sql`${environments.environmentId} IN (${sql.join(
+							accessedEnvironments.map((envId) => sql`${envId}`),
+							sql`, `,
+						)})`,
+						isNull(environments.deletedAt),
+					);
 
 		const applyFilter = (col: AnyPgColumn) =>
 			isPrivileged ? undefined : buildServiceFilter(col, accessedServices);
@@ -547,7 +570,10 @@ export const projectRouter = createTRPCRouter({
 					columns: { environmentId: true },
 					with: {
 						applications: {
-							where: applyFilter(applications.applicationId),
+							where: and(
+								applyFilter(applications.applicationId),
+								isNull(applications.deletedAt),
+							),
 							columns: { applicationStatus: true },
 						},
 						compose: {
@@ -642,6 +668,7 @@ export const projectRouter = createTRPCRouter({
 		.query(async ({ ctx, input }) => {
 			const baseConditions = [
 				eq(projects.organizationId, ctx.session.activeOrganizationId),
+				isNull(projects.deletedAt),
 			];
 
 			if (input.q?.trim()) {
@@ -720,7 +747,10 @@ export const projectRouter = createTRPCRouter({
 					});
 				}
 				await checkProjectAccess(ctx, "delete", input.projectId);
-				const deletedProject = await deleteProject(input.projectId);
+				const deletedProject = await deleteProject(
+					input.projectId,
+					ctx.session.activeOrganizationId,
+				);
 
 				await audit(ctx, {
 					action: "delete",
@@ -812,24 +842,21 @@ export const projectRouter = createTRPCRouter({
 			try {
 				await checkProjectAccess(ctx, "create");
 
-				const sourceEnvironment = input.duplicateInSameProject
-					? await findEnvironmentById(input.sourceEnvironmentId)
-					: null;
+				const sourceEnvironment = await findEnvironmentById(
+					input.sourceEnvironmentId,
+				);
 
 				if (
-					input.duplicateInSameProject &&
-					sourceEnvironment?.project.organizationId !==
+					sourceEnvironment.project.organizationId !==
 						ctx.session.activeOrganizationId
 				) {
 					throw new TRPCError({
-						code: "UNAUTHORIZED",
-						message: "You are not authorized to access this project",
+						code: "NOT_FOUND",
+						message: "Source environment not found",
 					});
 				}
 
 				if (
-					input.duplicateInSameProject &&
-					sourceEnvironment &&
 					ctx.user.role !== "owner" &&
 					ctx.user.role !== "admin"
 				) {
@@ -860,8 +887,20 @@ export const projectRouter = createTRPCRouter({
 					const servicesToDuplicate = input.selectedServices || [];
 
 					const duplicateService = async (id: string, type: string) => {
+						const assertSourceEnvironment = (
+							service: { environmentId: string },
+						) => {
+							if (service.environmentId !== sourceEnvironment.environmentId) {
+								throw new TRPCError({
+									code: "NOT_FOUND",
+									message: "Source service not found",
+								});
+							}
+						};
 						switch (type) {
 							case "application": {
+								const sourceApplication = await findApplicationById(id);
+								assertSourceEnvironment(sourceApplication);
 								const {
 									applicationId,
 									domains,
@@ -874,7 +913,7 @@ export const projectRouter = createTRPCRouter({
 									appName,
 									refreshToken,
 									...application
-								} = await findApplicationById(id);
+								} = sourceApplication;
 								const newAppName = appName.substring(
 									0,
 									appName.lastIndexOf("-"),
@@ -943,6 +982,8 @@ export const projectRouter = createTRPCRouter({
 								break;
 							}
 							case "compose": {
+								const sourceCompose = await findComposeById(id);
+								assertSourceEnvironment(sourceCompose);
 								const {
 									composeId,
 									mounts,
@@ -950,7 +991,7 @@ export const projectRouter = createTRPCRouter({
 									appName,
 									refreshToken,
 									...compose
-								} = await findComposeById(id);
+								} = sourceCompose;
 
 								const newAppName = appName.substring(
 									0,
@@ -987,8 +1028,9 @@ export const projectRouter = createTRPCRouter({
 								break;
 							}
 							case "libsql": {
-								const { libsqlId, mounts, appName, ...libsql } =
-									await findLibsqlById(id);
+								const sourceLibsql = await findLibsqlById(id);
+								assertSourceEnvironment(sourceLibsql);
+								const { libsqlId, mounts, appName, ...libsql } = sourceLibsql;
 
 								const newAppName = appName.substring(
 									0,
@@ -1016,8 +1058,10 @@ export const projectRouter = createTRPCRouter({
 								break;
 							}
 							case "mariadb": {
+								const sourceMariadb = await findMariadbById(id);
+								assertSourceEnvironment(sourceMariadb);
 								const { mariadbId, mounts, backups, appName, ...mariadb } =
-									await findMariadbById(id);
+									sourceMariadb;
 
 								const newAppName = appName.substring(
 									0,
@@ -1052,8 +1096,9 @@ export const projectRouter = createTRPCRouter({
 								break;
 							}
 							case "mongo": {
-								const { mongoId, mounts, backups, appName, ...mongo } =
-									await findMongoById(id);
+								const sourceMongo = await findMongoById(id);
+								assertSourceEnvironment(sourceMongo);
+								const { mongoId, mounts, backups, appName, ...mongo } = sourceMongo;
 
 								const newAppName = appName.substring(
 									0,
@@ -1088,8 +1133,9 @@ export const projectRouter = createTRPCRouter({
 								break;
 							}
 							case "mysql": {
-								const { mysqlId, mounts, backups, appName, ...mysql } =
-									await findMySqlById(id);
+								const sourceMysql = await findMySqlById(id);
+								assertSourceEnvironment(sourceMysql);
+								const { mysqlId, mounts, backups, appName, ...mysql } = sourceMysql;
 
 								const newAppName = appName.substring(
 									0,
@@ -1124,8 +1170,10 @@ export const projectRouter = createTRPCRouter({
 								break;
 							}
 							case "postgres": {
+								const sourcePostgres = await findPostgresById(id);
+								assertSourceEnvironment(sourcePostgres);
 								const { postgresId, mounts, backups, appName, ...postgres } =
-									await findPostgresById(id);
+									sourcePostgres;
 
 								const newAppName = appName.substring(
 									0,
@@ -1160,8 +1208,9 @@ export const projectRouter = createTRPCRouter({
 								break;
 							}
 							case "redis": {
-								const { redisId, mounts, appName, ...redis } =
-									await findRedisById(id);
+								const sourceRedis = await findRedisById(id);
+								assertSourceEnvironment(sourceRedis);
+								const { redisId, mounts, appName, ...redis } = sourceRedis;
 
 								const newAppName = appName.substring(
 									0,

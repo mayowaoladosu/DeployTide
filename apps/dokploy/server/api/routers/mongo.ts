@@ -17,6 +17,7 @@ import {
 	rebuildDatabase,
 	removeMongoById,
 	removeService,
+	resolveEnvironmentOwnership,
 	startService,
 	startServiceRemote,
 	stopService,
@@ -474,15 +475,24 @@ export const mongoRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.mongoId, {
 				service: ["create"],
 			});
-
-			const updatedMongo = await db
-				.update(mongoTable)
-				.set({
-					environmentId: input.targetEnvironmentId,
-				})
-				.where(eq(mongoTable.mongoId, input.mongoId))
-				.returning()
-				.then((res) => res[0]);
+			const updatedMongo = await db.transaction(async (transaction) => {
+				const ownership = await resolveEnvironmentOwnership(
+					transaction,
+					input.targetEnvironmentId,
+					ctx.session.activeOrganizationId,
+				);
+				return transaction
+					.update(mongoTable)
+					.set(ownership)
+					.where(
+						and(
+							eq(mongoTable.mongoId, input.mongoId),
+							eq(mongoTable.organizationId, ctx.session.activeOrganizationId),
+						),
+					)
+					.returning()
+					.then((res) => res[0]);
+			});
 
 			if (!updatedMongo) {
 				throw new TRPCError({

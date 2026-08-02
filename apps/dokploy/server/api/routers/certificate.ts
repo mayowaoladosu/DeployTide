@@ -8,7 +8,7 @@ import {
 import { db } from "@dokploy/server/db";
 import { TRPCError } from "@trpc/server";
 import { eq } from "drizzle-orm";
-import { createTRPCRouter, withPermission } from "@/server/api/trpc";
+import { createTRPCRouter, operatorProcedure } from "@/server/api/trpc";
 import { audit } from "@/server/api/utils/audit";
 import {
 	apiCreateCertificate,
@@ -16,6 +16,8 @@ import {
 	apiUpdateCertificate,
 	certificates,
 } from "@/server/db/schema";
+
+const withPermission = (_resource: string, _action: string) => operatorProcedure;
 
 export const certificateRouter = createTRPCRouter({
 	create: withPermission("certificate", "create")

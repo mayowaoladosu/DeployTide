@@ -6,6 +6,7 @@ import {
 	removePreviewDeployment,
 } from "@dokploy/server";
 import { checkServicePermissionAndAccess } from "@dokploy/server/services/permission";
+import { assertWorkspaceResource } from "@dokploy/server/services/tenancy";
 import { z } from "zod";
 import { audit } from "@/server/api/utils/audit";
 import { apiFindAllByApplication } from "@/server/db/schema";
@@ -30,6 +31,11 @@ export const previewDeploymentRouter = createTRPCRouter({
 			const previewDeployment = await findPreviewDeploymentById(
 				input.previewDeploymentId,
 			);
+			assertWorkspaceResource(
+				ctx.session.activeOrganizationId,
+				previewDeployment,
+				"Preview",
+			);
 			await checkServicePermissionAndAccess(
 				ctx,
 				previewDeployment.applicationId,
@@ -43,6 +49,11 @@ export const previewDeploymentRouter = createTRPCRouter({
 		.mutation(async ({ input, ctx }) => {
 			const previewDeployment = await findPreviewDeploymentById(
 				input.previewDeploymentId,
+			);
+			assertWorkspaceResource(
+				ctx.session.activeOrganizationId,
+				previewDeployment,
+				"Preview",
 			);
 			await checkServicePermissionAndAccess(
 				ctx,
@@ -69,6 +80,11 @@ export const previewDeploymentRouter = createTRPCRouter({
 		.mutation(async ({ input, ctx }) => {
 			const previewDeployment = await findPreviewDeploymentById(
 				input.previewDeploymentId,
+			);
+			assertWorkspaceResource(
+				ctx.session.activeOrganizationId,
+				previewDeployment,
+				"Preview",
 			);
 			await checkServicePermissionAndAccess(
 				ctx,

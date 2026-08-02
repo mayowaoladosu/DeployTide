@@ -8,11 +8,11 @@ import {
 } from "@dokploy/server";
 import { TRPCError } from "@trpc/server";
 import { z } from "zod";
-import { createTRPCRouter, withPermission } from "../trpc";
+import { createTRPCRouter, operatorProcedure } from "../trpc";
 import { containerIdRegex } from "./docker";
 
 export const swarmRouter = createTRPCRouter({
-	getNodes: withPermission("server", "read")
+	getNodes: operatorProcedure
 		.input(
 			z.object({
 				serverId: z.string().optional(),
@@ -30,7 +30,7 @@ export const swarmRouter = createTRPCRouter({
 			}
 			return await getSwarmNodes(input.serverId);
 		}),
-	getNodeInfo: withPermission("server", "read")
+	getNodeInfo: operatorProcedure
 		.input(z.object({ nodeId: z.string(), serverId: z.string().optional() }))
 		.query(async ({ input, ctx }) => {
 			if (input.serverId) {
@@ -44,7 +44,7 @@ export const swarmRouter = createTRPCRouter({
 			}
 			return await getNodeInfo(input.nodeId, input.serverId);
 		}),
-	getNodeApps: withPermission("server", "read")
+	getNodeApps: operatorProcedure
 		.input(
 			z.object({
 				serverId: z.string().optional(),
@@ -62,7 +62,7 @@ export const swarmRouter = createTRPCRouter({
 			}
 			return getNodeApplications(input.serverId);
 		}),
-	getAppInfos: withPermission("server", "read")
+	getAppInfos: operatorProcedure
 		.meta({
 			openapi: {
 				path: "/drop-deployment",
@@ -93,7 +93,7 @@ export const swarmRouter = createTRPCRouter({
 			}
 			return await getApplicationInfo(input.appName, input.serverId);
 		}),
-	getContainerStats: withPermission("server", "read")
+	getContainerStats: operatorProcedure
 		.input(
 			z.object({
 				serverId: z.string().optional(),

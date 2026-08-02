@@ -104,9 +104,13 @@ export const gitProviderRouter = createTRPCRouter({
 				resourceName: provider.name ?? provider.gitProviderId,
 			});
 
-			return await updateGitProvider(input.gitProviderId, {
-				sharedWithOrganization: input.sharedWithOrganization,
-			});
+			return await updateGitProvider(
+				input.gitProviderId,
+				ctx.session.activeOrganizationId,
+				{
+					sharedWithOrganization: input.sharedWithOrganization,
+				},
+			);
 		}),
 
 	allForPermissions: withPermission("member", "update").query(async ({ ctx }) => {

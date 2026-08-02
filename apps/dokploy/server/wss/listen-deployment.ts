@@ -1,10 +1,28 @@
 import { spawn } from "node:child_process";
+import { createHash, timingSafeEqual } from "node:crypto";
 import type http from "node:http";
-import { findServerById, IS_CLOUD, validateRequest } from "@dokploy/server";
+import {
+	findServerById,
+	findWorkspaceDeployment,
+	IS_CLOUD,
+	validateRequest,
+} from "@dokploy/server";
+import { checkServicePermissionAndAccess } from "@dokploy/server/services/permission";
 import { encodeBase64 } from "@dokploy/server/utils/docker/utils";
 import { readValidDirectory } from "@dokploy/server/wss/utils";
 import { Client } from "ssh2";
 import { WebSocketServer } from "ws";
+
+const hasOperatorToken = (req: http.IncomingMessage) => {
+	const expected = process.env.DEPLOYTIDE_OPERATOR_API_TOKEN;
+	const raw = req.headers["x-deploytide-operator-token"];
+	const provided = Array.isArray(raw) ? raw[0] : raw;
+	if (!expected || !provided) return false;
+	return timingSafeEqual(
+		createHash("sha256").update(expected).digest(),
+		createHash("sha256").update(provided).digest(),
+	);
+};
 
 export const setupDeploymentLogsWebSocketServer = (
 	server: http.Server<typeof http.IncomingMessage, typeof http.ServerResponse>,
@@ -29,25 +47,59 @@ export const setupDeploymentLogsWebSocketServer = (
 
 	wssTerm.on("connection", async (ws, req) => {
 		const url = new URL(req.url || "", `http://${req.headers.host}`);
-		const logPath = url.searchParams.get("logPath");
-		const serverId = url.searchParams.get("serverId");
+		const deploymentId = url.searchParams.get("deploymentId");
+		const legacyLogPath = url.searchParams.get("logPath");
+		const legacyServerId = url.searchParams.get("serverId");
 		const { user, session } = await validateRequest(req);
 
 		// Generate unique connection ID for tracking
 		const connectionId = `deployment-logs-${Date.now()}-${Math.random().toString(36).substring(7)}`;
-		if (!logPath) {
-			console.log(`[${connectionId}] logPath no provided`);
-			ws.close(4000, "logPath no provided");
+		if (!deploymentId && (!legacyLogPath || !hasOperatorToken(req))) {
+			console.log(`[${connectionId}] deploymentId not provided`);
+			ws.close(4000, "deploymentId not provided");
 			return;
 		}
 
-		if (!readValidDirectory(logPath, serverId)) {
-			ws.close(4000, "Invalid log path");
-			return;
-		}
-
-		if (!user || !session) {
+		if (!user || !session?.activeOrganizationId) {
 			ws.close();
+			return;
+		}
+		let logPath = legacyLogPath || "";
+		let serverId: string | null = legacyServerId;
+		if (deploymentId) {
+			try {
+				const deployment = await findWorkspaceDeployment(
+					session.activeOrganizationId,
+					deploymentId,
+				);
+				const serviceId =
+					deployment.applicationId ??
+					deployment.composeId ??
+					deployment.previewDeployment?.applicationId;
+				if (serviceId) {
+					await checkServicePermissionAndAccess(
+						{
+							user: { id: user.id },
+							session: {
+								activeOrganizationId: session.activeOrganizationId,
+							},
+						},
+						serviceId,
+						{ deployment: ["read"] },
+					);
+				} else if (!hasOperatorToken(req)) {
+					ws.close(4003, "Infrastructure logs are operator-only");
+					return;
+				}
+				logPath = deployment.logPath;
+				serverId = deployment.serverId ?? deployment.buildServerId;
+			} catch {
+				ws.close();
+				return;
+			}
+		}
+		if (!readValidDirectory(logPath, serverId)) {
+			ws.close(4000, "Invalid deployment log path");
 			return;
 		}
 

@@ -13,6 +13,7 @@ import {
 	rebuildDatabase,
 	removeLibsqlById,
 	removeService,
+	resolveEnvironmentOwnership,
 	startService,
 	startServiceRemote,
 	stopService,
@@ -25,7 +26,7 @@ import {
 	checkServicePermissionAndAccess,
 } from "@dokploy/server/services/permission";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { audit } from "@/server/api/utils/audit";
@@ -432,15 +433,24 @@ export const libsqlRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.libsqlId, {
 				service: ["create"],
 			});
-
-			const updatedLibsql = await db
-				.update(libsqlTable)
-				.set({
-					environmentId: input.targetEnvironmentId,
-				})
-				.where(eq(libsqlTable.libsqlId, input.libsqlId))
-				.returning()
-				.then((res) => res[0]);
+			const updatedLibsql = await db.transaction(async (transaction) => {
+				const ownership = await resolveEnvironmentOwnership(
+					transaction,
+					input.targetEnvironmentId,
+					ctx.session.activeOrganizationId,
+				);
+				return transaction
+					.update(libsqlTable)
+					.set(ownership)
+					.where(
+						and(
+							eq(libsqlTable.libsqlId, input.libsqlId),
+							eq(libsqlTable.organizationId, ctx.session.activeOrganizationId),
+						),
+					)
+					.returning()
+					.then((res) => res[0]);
+			});
 
 			if (!updatedLibsql) {
 				throw new TRPCError({

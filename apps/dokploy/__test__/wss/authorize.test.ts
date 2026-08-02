@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 // Mock the permission + server helpers the wss authorizer composes.
 const mockHasPermission = vi.hoisted(() => vi.fn());
@@ -11,8 +11,14 @@ vi.mock("@dokploy/server/services/permission", () => ({
 }));
 
 const mockGetAccessibleServerIds = vi.hoisted(() => vi.fn());
+const mockFindWorkspaceServiceRuntime = vi.hoisted(() => vi.fn());
+const mockGetContainersByAppNameMatch = vi.hoisted(() => vi.fn());
+const mockGetServiceContainersByAppName = vi.hoisted(() => vi.fn());
 vi.mock("@dokploy/server", () => ({
 	getAccessibleServerIds: mockGetAccessibleServerIds,
+	findWorkspaceServiceRuntime: mockFindWorkspaceServiceRuntime,
+	getContainersByAppNameMatch: mockGetContainersByAppNameMatch,
+	getServiceContainersByAppName: mockGetServiceContainersByAppName,
 }));
 
 import {
@@ -25,7 +31,20 @@ const SESSION = { activeOrganizationId: "org-1" };
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	mockFindWorkspaceServiceRuntime.mockResolvedValue({
+		serviceId: "svc-1",
+		appName: "app-owned",
+		serverId: null,
+		type: "application",
+	});
+	mockGetContainersByAppNameMatch.mockResolvedValue([
+		{ containerId: "owned-container" },
+	]);
+	mockGetServiceContainersByAppName.mockResolvedValue([
+		{ containerId: "owned-swarm-container" },
+	]);
 });
+afterEach(() => vi.unstubAllEnvs());
 
 describe("canAccessDockerOverWss", () => {
 	it("denies when there is no user or session", async () => {
@@ -69,12 +88,48 @@ describe("canAccessDockerOverWss", () => {
 		mockHasPermission.mockResolvedValue(false);
 		mockGetAccessibleServerIds.mockResolvedValue(new Set());
 		mockCheckServiceAccess.mockResolvedValue(undefined);
+		mockFindWorkspaceServiceRuntime.mockResolvedValue({
+			serviceId: "svc-1",
+			appName: "app-owned",
+			serverId: "srv-remote",
+			type: "application",
+		});
 		expect(
 			await canAccessDockerOverWss(USER, SESSION, "srv-remote", "svc-1"),
 		).toBe(true);
 		// Service path is authoritative — it must not fall through to docker/server.
 		expect(mockHasPermission).not.toHaveBeenCalled();
 		expect(mockGetAccessibleServerIds).not.toHaveBeenCalled();
+	});
+
+	it("blocks generic Docker access in managed mode", async () => {
+		vi.stubEnv("IS_CLOUD", "true");
+		mockHasPermission.mockResolvedValue(true);
+		expect(await canAccessDockerOverWss(USER, SESSION, "srv-1")).toBe(false);
+	});
+
+	it("rejects a container outside the authorized service", async () => {
+		mockCheckServiceAccess.mockResolvedValue(undefined);
+		expect(
+			await canAccessDockerOverWss(
+				USER,
+				SESSION,
+				null,
+				"svc-1",
+				"foreign-container",
+				"native",
+			),
+		).toBe(false);
+		expect(
+			await canAccessDockerOverWss(
+				USER,
+				SESSION,
+				null,
+				"svc-1",
+				"owned-container",
+				"native",
+			),
+		).toBe(true);
 	});
 });
 
@@ -100,5 +155,13 @@ describe("canAccessTerminalOverWss", () => {
 		expect(await canAccessTerminalOverWss(USER, SESSION, "srv-2")).toBe(false);
 		// role lookup must not be needed for the remote path
 		expect(mockFindMember).not.toHaveBeenCalled();
+	});
+
+	it("blocks all host and server terminals in managed mode", async () => {
+		vi.stubEnv("IS_CLOUD", "true");
+		mockFindMember.mockResolvedValue({ role: "owner" });
+		mockGetAccessibleServerIds.mockResolvedValue(new Set(["srv-1"]));
+		expect(await canAccessTerminalOverWss(USER, SESSION, "local")).toBe(false);
+		expect(await canAccessTerminalOverWss(USER, SESSION, "srv-1")).toBe(false);
 	});
 });

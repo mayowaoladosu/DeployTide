@@ -1,6 +1,7 @@
 import { IS_CLOUD, shouldDeploy } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
-import { eq } from "drizzle-orm";
+import { digestDeploymentToken } from "@dokploy/server/lib/sensitive-digest";
+import { and, eq, isNull } from "drizzle-orm";
 import type { NextApiRequest, NextApiResponse } from "next";
 import { compose } from "@/server/db/schema";
 import type { DeploymentJob } from "@/server/queues/queue-types";
@@ -26,18 +27,31 @@ export default async function handler(
 			return;
 		}
 		const composeResult = await db.query.compose.findFirst({
-			where: eq(compose.refreshToken, refreshToken as string),
+			where: and(
+				eq(
+					compose.refreshTokenDigest,
+					digestDeploymentToken(refreshToken as string),
+				),
+				isNull(compose.deletedAt),
+			),
 			with: {
+				organization: { columns: { deletedAt: true } },
 				environment: {
+					columns: { deletedAt: true },
 					with: {
-						project: true,
+						project: { columns: { deletedAt: true } },
 					},
 				},
 				bitbucket: true,
 			},
 		});
 
-		if (!composeResult) {
+		if (
+			!composeResult ||
+			composeResult.organization.deletedAt ||
+			composeResult.environment.deletedAt ||
+			composeResult.environment.project.deletedAt
+		) {
 			res.status(404).json({ message: "Compose Not Found" });
 			return;
 		}

@@ -4,6 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { applications } from "./application";
+import { encryptedText } from "./utils";
 
 export const security = pgTable(
 	"security",
@@ -13,7 +14,7 @@ export const security = pgTable(
 			.primaryKey()
 			.$defaultFn(() => nanoid()),
 		username: text("username").notNull(),
-		password: text("password").notNull(),
+		password: encryptedText("password").notNull(),
 		createdAt: text("createdAt")
 			.notNull()
 			.$defaultFn(() => new Date().toISOString()),

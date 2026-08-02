@@ -1,17 +1,26 @@
 import { db } from "@dokploy/server/db";
 import {
+	aliases,
 	type apiCreateProject,
 	applications,
+	compose,
+	deployments,
+	domains,
+	environments,
+	environmentVariables,
 	libsql,
 	mariadb,
 	mongo,
 	mysql,
 	postgres,
+	previewDeployments,
+	projectSources,
 	projects,
 	redis,
+	rollbacks,
 } from "@dokploy/server/db/schema";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull, sql } from "drizzle-orm";
 import type { z } from "zod";
 import { createProductionEnvironment } from "./environment";
 
@@ -58,11 +67,16 @@ export const findProjectById = async (projectId: string) => {
 	} as const;
 
 	const project = await db.query.projects.findFirst({
-		where: eq(projects.projectId, projectId),
+		where: and(
+			eq(projects.projectId, projectId),
+			isNull(projects.deletedAt),
+		),
 		with: {
 			environments: {
+				where: isNull(environments.deletedAt),
 				with: {
 					applications: {
+						where: isNull(applications.deletedAt),
 						columns: {
 							...serviceColumns,
 							applicationId: true,
@@ -71,6 +85,7 @@ export const findProjectById = async (projectId: string) => {
 						with: { server: { columns: { name: true } } },
 					},
 					compose: {
+						where: isNull(compose.deletedAt),
 						columns: {
 							...serviceColumns,
 							composeId: true,
@@ -120,14 +135,75 @@ export const findProjectById = async (projectId: string) => {
 	return project;
 };
 
-export const deleteProject = async (projectId: string) => {
-	const project = await db
-		.delete(projects)
-		.where(eq(projects.projectId, projectId))
-		.returning()
-		.then((value) => value[0]);
+export const deleteProject = async (
+	projectId: string,
+	organizationId: string,
+) => {
+	const deletedAt = new Date();
+	return db.transaction(async (transaction) => {
+		const [project] = await transaction
+			.update(projects)
+			.set({ deletedAt })
+			.where(
+				and(
+					eq(projects.projectId, projectId),
+					eq(projects.organizationId, organizationId),
+					isNull(projects.deletedAt),
+				),
+			)
+			.returning();
+		if (!project) return null;
 
-	return project;
+		await Promise.all([
+			transaction
+				.update(environments)
+				.set({ deletedAt })
+				.where(eq(environments.projectId, projectId)),
+			transaction
+				.update(applications)
+				.set({ deletedAt })
+				.where(eq(applications.projectId, projectId)),
+			transaction
+				.update(compose)
+				.set({ deletedAt, autoDeploy: false, refreshTokenDigest: null })
+				.where(
+					and(isNull(compose.deletedAt), sql`${compose.environmentId} IN (
+						SELECT ${environments.environmentId}
+						FROM ${environments}
+						WHERE ${environments.projectId} = ${projectId}
+					)`),
+				),
+			transaction
+				.update(deployments)
+				.set({ deletedAt })
+				.where(eq(deployments.projectId, projectId)),
+			transaction
+				.update(domains)
+				.set({ deletedAt })
+				.where(eq(domains.projectId, projectId)),
+			transaction
+				.update(previewDeployments)
+				.set({ deletedAt })
+				.where(eq(previewDeployments.projectId, projectId)),
+			transaction
+				.update(rollbacks)
+				.set({ deletedAt })
+				.where(eq(rollbacks.projectId, projectId)),
+			transaction
+				.update(environmentVariables)
+				.set({ deletedAt, updatedAt: deletedAt })
+				.where(eq(environmentVariables.projectId, projectId)),
+			transaction
+				.update(projectSources)
+				.set({ enabled: false, updatedAt: deletedAt })
+				.where(eq(projectSources.projectId, projectId)),
+			transaction
+				.update(aliases)
+				.set({ status: "disabled", updatedAt: deletedAt })
+				.where(eq(aliases.projectId, projectId)),
+		]);
+		return project;
+	});
 };
 
 export const updateProjectById = async (

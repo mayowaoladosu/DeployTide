@@ -32,6 +32,32 @@ let memberToReturn: ReturnType<typeof mockMemberData> =
 vi.mock("@dokploy/server/db", () => ({
 	db: {
 		query: {
+			projects: {
+				findFirst: vi.fn(() =>
+					Promise.resolve({
+						projectId: "project-1",
+						organizationId: "org-1",
+						deletedAt: null,
+					}),
+				),
+			},
+			applications: {
+				findFirst: vi.fn(({ where }) =>
+					Promise.resolve(
+						where
+							? {
+								applicationId: "service-123",
+								appName: "service-test",
+								serverId: null,
+								environment: {
+									deletedAt: null,
+									project: { deletedAt: null },
+								},
+							}
+							: null,
+					),
+				),
+			},
 			member: {
 				findFirst: vi.fn(() => Promise.resolve(memberToReturn)),
 				findMany: vi.fn(() => Promise.resolve([])),

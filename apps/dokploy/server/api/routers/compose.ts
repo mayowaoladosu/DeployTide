@@ -1,5 +1,6 @@
 import {
 	addDomainToCompose,
+	beginDeploymentCancellation,
 	clearOldDeployments,
 	cloneCompose,
 	createCommand,
@@ -18,6 +19,8 @@ import {
 	getAccessibleServerIds,
 	getComposeContainer,
 	getContainerLogs,
+	getContainersByAppNameMatch,
+	getServiceContainersByAppName,
 	getWebServerSettings,
 	IS_CLOUD,
 	loadServices,
@@ -27,13 +30,19 @@ import {
 	removeComposeDirectory,
 	removeDeploymentsByComposeId,
 	removeDomainById,
+	resolveEnvironmentOwnership,
+	softDeleteCompose,
 	startCompose,
 	stopCompose,
+	transitionDeployment,
 	updateCompose,
 	updateDeploymentStatus,
 } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
-import { canEditDeployGitSource } from "@dokploy/server/services/git-provider";
+import {
+	assertGitSourceAttachmentAccess,
+	canEditDeployGitSource,
+} from "@dokploy/server/services/git-provider";
 import {
 	addNewService,
 	checkServiceAccess,
@@ -48,7 +57,7 @@ import {
 } from "@dokploy/server/templates/github";
 import { processTemplate } from "@dokploy/server/templates/processors";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
+import { and, desc, eq, ilike, inArray, isNull, or, sql } from "drizzle-orm";
 import _ from "lodash";
 import { nanoid } from "nanoid";
 import { parse } from "toml";
@@ -67,7 +76,9 @@ import {
 	apiUpdateCompose,
 	compose as composeTable,
 	environments,
+	network,
 	projects,
+	sshKeys,
 } from "@/server/db/schema";
 import type { DeploymentJob } from "@/server/queues/queue-types";
 import {
@@ -195,7 +206,56 @@ export const composeRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.composeId, {
 				service: ["create"],
 			});
-			const updated = await updateCompose(input.composeId, input);
+			await assertGitSourceAttachmentAccess(ctx.session, {
+				githubId: input.githubId,
+				gitlabId: input.gitlabId,
+				bitbucketId: input.bitbucketId,
+				giteaId: input.giteaId,
+			});
+			const updated = await db.transaction(async (transaction) => {
+				if (input.customGitSSHKeyId) {
+					const ownedKey = await transaction.query.sshKeys.findFirst({
+						where: and(
+							eq(sshKeys.sshKeyId, input.customGitSSHKeyId),
+							eq(sshKeys.organizationId, ctx.session.activeOrganizationId),
+						),
+						columns: { sshKeyId: true },
+					});
+					if (!ownedKey) {
+						throw new TRPCError({
+							code: "NOT_FOUND",
+							message: "SSH key not found",
+						});
+					}
+				}
+				if (input.serviceNetworks !== undefined) {
+				const networkIds = [
+					...new Set(
+						(input.serviceNetworks ?? []).flatMap((service) => service.networkIds),
+					),
+				];
+				const ownedNetworks =
+					networkIds.length === 0
+						? []
+						: await transaction.query.network.findMany({
+								where: and(
+									eq(
+										network.organizationId,
+										ctx.session.activeOrganizationId,
+									),
+									inArray(network.networkId, networkIds),
+								),
+								columns: { networkId: true },
+							});
+				if (ownedNetworks.length !== networkIds.length) {
+					throw new TRPCError({ code: "NOT_FOUND", message: "Network not found" });
+				}
+				}
+				return updateCompose(input.composeId, input, {
+					executor: transaction,
+					organizationId: ctx.session.activeOrganizationId,
+				});
+			});
 			await audit(ctx, {
 				action: "update",
 				resourceType: "compose",
@@ -245,10 +305,15 @@ export const composeRouter = createTRPCRouter({
 				});
 			}
 
-			const result = await db
-				.delete(composeTable)
-				.where(eq(composeTable.composeId, input.composeId))
-				.returning();
+			await removeDeploymentsByComposeId(composeResult);
+
+			const deletedCompose = await softDeleteCompose(input.composeId);
+			if (!deletedCompose) {
+				throw new TRPCError({
+					code: "CONFLICT",
+					message: "Compose was already deleted",
+				});
+			}
 
 			if (!IS_CLOUD) {
 				await cleanQueuesByCompose(input.composeId);
@@ -256,7 +321,6 @@ export const composeRouter = createTRPCRouter({
 
 			const cleanupOperations = [
 				async () => await removeCompose(composeResult, input.deleteVolumes),
-				async () => await removeDeploymentsByComposeId(composeResult),
 				async () => await removeComposeDirectory(composeResult.appName),
 			];
 
@@ -775,15 +839,27 @@ export const composeRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.composeId, {
 				service: ["create"],
 			});
-
-			const updatedCompose = await db
-				.update(composeTable)
-				.set({
-					environmentId: input.targetEnvironmentId,
-				})
-				.where(eq(composeTable.composeId, input.composeId))
-				.returning()
-				.then((res) => res[0]);
+			const updatedCompose = await db.transaction(async (transaction) => {
+				const ownership = await resolveEnvironmentOwnership(
+					transaction,
+					input.targetEnvironmentId,
+					ctx.session.activeOrganizationId,
+				);
+				return transaction
+					.update(composeTable)
+					.set(ownership)
+					.where(
+						and(
+							eq(composeTable.composeId, input.composeId),
+							eq(
+								composeTable.organizationId,
+								ctx.session.activeOrganizationId,
+							),
+						),
+					)
+					.returning()
+					.then((res) => res[0]);
+			});
 
 			if (!updatedCompose) {
 				throw new TRPCError({
@@ -1055,22 +1131,34 @@ export const composeRouter = createTRPCRouter({
 			const compose = await findComposeById(input.composeId);
 
 			if (IS_CLOUD && compose.serverId) {
+				let canonicalDeploymentId: string | null = null;
 				try {
 					await updateCompose(input.composeId, {
 						composeStatus: "idle",
 					});
-
-					if (compose.deployments[0]) {
-						await updateDeploymentStatus(
-							compose.deployments[0].deploymentId,
-							"done",
-						);
+					const cancellation = await beginDeploymentCancellation({
+						organizationId: ctx.session.activeOrganizationId,
+						composeId: input.composeId,
+					});
+					const active = cancellation?.deployment;
+					if (cancellation?.canonicalCancellation) {
+						canonicalDeploymentId = active?.deploymentId ?? null;
 					}
 
 					await cancelDeployment({
 						composeId: input.composeId,
 						applicationType: "compose",
 					});
+					if (canonicalDeploymentId) {
+						await transitionDeployment({
+							organizationId: ctx.session.activeOrganizationId,
+							deploymentId: canonicalDeploymentId,
+							expectedStatus: "cancelling",
+							nextStatus: "cancelled",
+						});
+					} else if (active?.status === "running") {
+						await updateDeploymentStatus(active.deploymentId, "cancelled");
+					}
 
 					await audit(ctx, {
 						action: "stop",
@@ -1083,6 +1171,17 @@ export const composeRouter = createTRPCRouter({
 						message: "Deployment cancellation requested",
 					};
 				} catch (error) {
+					if (canonicalDeploymentId) {
+						await transitionDeployment({
+							organizationId: ctx.session.activeOrganizationId,
+							deploymentId: canonicalDeploymentId,
+							expectedStatus: "cancelling",
+							nextStatus: "failed",
+							errorCode: "cancel_failed",
+							errorMessage:
+								error instanceof Error ? error.message : "Cancellation failed",
+						});
+					}
 					throw new TRPCError({
 						code: "INTERNAL_SERVER_ERROR",
 						message:
@@ -1115,6 +1214,9 @@ export const composeRouter = createTRPCRouter({
 		.query(async ({ ctx, input }) => {
 			const baseConditions = [
 				eq(projects.organizationId, ctx.session.activeOrganizationId),
+				isNull(projects.deletedAt),
+				isNull(environments.deletedAt),
+				isNull(composeTable.deletedAt),
 			];
 
 			if (input.projectId) {
@@ -1235,6 +1337,27 @@ export const composeRouter = createTRPCRouter({
 				throw new TRPCError({
 					code: "UNAUTHORIZED",
 					message: "You are not authorized to access this compose",
+				});
+			}
+			const allowedContainers =
+				compose.composeType === "stack"
+					? await getServiceContainersByAppName(
+							compose.appName,
+							compose.serverId ?? undefined,
+						)
+					: await getContainersByAppNameMatch(
+							compose.appName,
+							"docker-compose",
+							compose.serverId ?? undefined,
+						);
+			if (
+				!allowedContainers.some(
+					(container) => container.containerId === input.containerId,
+				)
+			) {
+				throw new TRPCError({
+					code: "NOT_FOUND",
+					message: "Container not found",
 				});
 			}
 			return await getContainerLogs(

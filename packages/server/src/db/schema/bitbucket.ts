@@ -4,6 +4,7 @@ import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { gitProvider } from "./git-provider";
+import { encryptedText } from "./utils";
 
 export const bitbucket = pgTable("bitbucket", {
 	bitbucketId: text("bitbucketId")
@@ -12,8 +13,8 @@ export const bitbucket = pgTable("bitbucket", {
 		.$defaultFn(() => nanoid()),
 	bitbucketUsername: text("bitbucketUsername"),
 	bitbucketEmail: text("bitbucketEmail"),
-	appPassword: text("appPassword"),
-	apiToken: text("apiToken"),
+	appPassword: encryptedText("appPassword"),
+	apiToken: encryptedText("apiToken"),
 	bitbucketWorkspaceName: text("bitbucketWorkspaceName"),
 	gitProviderId: text("gitProviderId")
 		.notNull()
@@ -78,5 +79,4 @@ export const apiUpdateBitbucket = createSchema.extend({
 	appPassword: z.string().optional(),
 	apiToken: z.string().optional(),
 	bitbucketWorkspaceName: z.string().optional(),
-	organizationId: z.string().optional(),
 });

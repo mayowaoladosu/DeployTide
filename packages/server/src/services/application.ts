@@ -4,6 +4,8 @@ import {
 	type apiCreateApplication,
 	applications,
 	buildAppName,
+	environments,
+	projects,
 } from "@dokploy/server/db/schema";
 import { getAdvancedStats } from "@dokploy/server/monitoring/utils";
 import {
@@ -28,8 +30,9 @@ import { cloneGithubRepository } from "@dokploy/server/utils/providers/github";
 import { cloneGitlabRepository } from "@dokploy/server/utils/providers/gitlab";
 import { createTraefikConfig } from "@dokploy/server/utils/traefik/application";
 import { TRPCError } from "@trpc/server";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { z } from "zod";
+import { digestDeploymentToken } from "../lib/sensitive-digest";
 import { encodeBase64 } from "../utils/docker/utils";
 import { getDokployUrl } from "./admin";
 import {
@@ -67,11 +70,23 @@ export const createApplication = async (
 	}
 
 	return await db.transaction(async (tx) => {
+		const environment = await tx.query.environments.findFirst({
+			where: eq(environments.environmentId, input.environmentId),
+			with: { project: true },
+		});
+		if (!environment || environment.deletedAt || environment.project.deletedAt) {
+			throw new TRPCError({
+				code: "NOT_FOUND",
+				message: "Project environment not found",
+			});
+		}
 		const newApplication = await tx
 			.insert(applications)
 			.values({
 				...input,
 				appName,
+				organizationId: environment.project.organizationId,
+				projectId: environment.projectId,
 			})
 			.returning()
 			.then((value) => value[0]);
@@ -82,6 +97,26 @@ export const createApplication = async (
 				message: "Error creating the application",
 			});
 		}
+		if (newApplication.refreshToken) {
+			newApplication.refreshTokenDigest = digestDeploymentToken(
+				newApplication.refreshToken,
+			);
+			await tx
+				.update(applications)
+				.set({ refreshTokenDigest: newApplication.refreshTokenDigest })
+				.where(eq(applications.applicationId, newApplication.applicationId));
+		}
+
+		await tx
+			.update(projects)
+			.set({ primaryApplicationId: newApplication.applicationId })
+			.where(
+				and(
+					eq(projects.projectId, environment.projectId),
+					eq(projects.organizationId, environment.project.organizationId),
+					isNull(projects.primaryApplicationId),
+				),
+			);
 
 		if (process.env.NODE_ENV === "development") {
 			createTraefikConfig(newApplication.appName);
@@ -93,7 +128,10 @@ export const createApplication = async (
 
 export const findApplicationById = async (applicationId: string) => {
 	const application = await db.query.applications.findFirst({
-		where: eq(applications.applicationId, applicationId),
+		where: and(
+			eq(applications.applicationId, applicationId),
+			isNull(applications.deletedAt),
+		),
 		with: {
 			environment: { with: { project: true } },
 			domains: true,
@@ -147,14 +185,48 @@ export const findApplicationByName = async (appName: string) => {
 export const updateApplication = async (
 	applicationId: string,
 	applicationData: Partial<Application>,
+	options?: {
+		executor?: Parameters<Parameters<typeof db.transaction>[0]>[0] | typeof db;
+		organizationId?: string;
+	},
 ) => {
 	const { appName, ...rest } = applicationData;
-	const application = await db
+	const executor = options?.executor ?? db;
+	const current = await executor.query.applications.findFirst({
+		where: and(
+			eq(applications.applicationId, applicationId),
+			isNull(applications.deletedAt),
+			...(options?.organizationId
+				? [eq(applications.organizationId, options.organizationId)]
+				: []),
+		),
+		columns: { organizationId: true },
+		with: { environment: { with: { project: true } } },
+	});
+	if (
+		!current ||
+		current.environment.deletedAt ||
+		current.environment.project.deletedAt
+	) {
+		throw new TRPCError({ code: "NOT_FOUND", message: "Application not found" });
+	}
+	if (rest.refreshToken !== undefined) {
+		rest.refreshTokenDigest = rest.refreshToken
+			? digestDeploymentToken(rest.refreshToken)
+			: null;
+	}
+	const application = await executor
 		.update(applications)
 		.set({
 			...rest,
 		})
-		.where(eq(applications.applicationId, applicationId))
+		.where(
+			and(
+				eq(applications.applicationId, applicationId),
+				eq(applications.organizationId, current.organizationId),
+				isNull(applications.deletedAt),
+			),
+		)
 		.returning();
 
 	return application[0];
@@ -232,6 +304,21 @@ export const deployApplication = async ({
 		}
 
 		await mechanizeDockerContainer(application);
+		if (application.sourceType !== "docker") {
+			const commitInfo = await getGitCommitInfo({
+				appName: application.appName,
+				type: "application",
+				serverId,
+			});
+			if (commitInfo) {
+				await updateDeployment(deployment.deploymentId, {
+					title: commitInfo.message,
+					description: `Commit: ${commitInfo.hash}`,
+					sourceRevision: commitInfo.hash,
+					sourceMessage: commitInfo.message,
+				});
+			}
+		}
 		await updateDeploymentStatus(deployment.deploymentId, "done");
 		await updateApplicationStatus(applicationId, "done");
 
@@ -274,21 +361,6 @@ export const deployApplication = async ({
 		});
 
 		throw error;
-	} finally {
-		// Only extract commit info for non-docker sources
-		if (application.sourceType !== "docker") {
-			const commitInfo = await getGitCommitInfo({
-				appName: application.appName,
-				type: "application",
-				serverId: serverId,
-			});
-			if (commitInfo) {
-				await updateDeployment(deployment.deploymentId, {
-					title: commitInfo.message,
-					description: `Commit: ${commitInfo.hash}`,
-				});
-			}
-		}
 	}
 	return true;
 };

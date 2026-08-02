@@ -16,6 +16,10 @@ import { parse, stringify } from "yaml";
  */
 describe("Host rule format regression tests", () => {
 	const baseDomain: Domain = {
+		organizationId: null,
+		projectId: null,
+		environmentId: null,
+		deletedAt: null,
 		host: "example.com",
 		port: 8080,
 		https: false,

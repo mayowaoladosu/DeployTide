@@ -1,5 +1,12 @@
 import { db } from "@dokploy/server/db";
-import { gitProvider, member } from "@dokploy/server/db/schema";
+import {
+	bitbucket,
+	gitea,
+	github,
+	gitlab,
+	gitProvider,
+	member,
+} from "@dokploy/server/db/schema";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 
@@ -30,16 +37,23 @@ export const findGitProviderById = async (gitProviderId: string) => {
 
 export const updateGitProvider = async (
 	gitProviderId: string,
+	organizationId: string,
 	input: Partial<GitProvider>,
 ) => {
+	const { organizationId: _ignoredOrganizationId, ...safeInput } = input;
 	return await db
 		.update(gitProvider)
 		.set({
-			...input,
+			...safeInput,
 		})
-		.where(eq(gitProvider.gitProviderId, gitProviderId))
+		.where(
+			and(
+				eq(gitProvider.gitProviderId, gitProviderId),
+				eq(gitProvider.organizationId, organizationId),
+			),
+		)
 		.returning()
-		.then((response) => response[0]);
+		.then((response) => response[0] ?? null);
 };
 
 // Returns true if the user can edit the git source configuration of an existing
@@ -140,5 +154,49 @@ export const assertGitProviderAccess = async (
 			code: "FORBIDDEN",
 			message: "You don't have access to this git provider",
 		});
+	}
+};
+
+export const assertGitSourceAttachmentAccess = async (
+	session: { userId: string; activeOrganizationId: string },
+	references: {
+		githubId?: string | null;
+		gitlabId?: string | null;
+		bitbucketId?: string | null;
+		giteaId?: string | null;
+	},
+) => {
+	const lookups = [
+		references.githubId
+			? db.query.github.findFirst({
+					where: eq(github.githubId, references.githubId),
+					with: { gitProvider: true },
+				})
+			: null,
+		references.gitlabId
+			? db.query.gitlab.findFirst({
+					where: eq(gitlab.gitlabId, references.gitlabId),
+					with: { gitProvider: true },
+				})
+			: null,
+		references.bitbucketId
+			? db.query.bitbucket.findFirst({
+					where: eq(bitbucket.bitbucketId, references.bitbucketId),
+					with: { gitProvider: true },
+				})
+			: null,
+		references.giteaId
+			? db.query.gitea.findFirst({
+					where: eq(gitea.giteaId, references.giteaId),
+					with: { gitProvider: true },
+				})
+			: null,
+	].filter((lookup): lookup is NonNullable<typeof lookup> => lookup !== null);
+
+	for (const provider of await Promise.all(lookups)) {
+		if (!provider) {
+			throw new TRPCError({ code: "NOT_FOUND", message: "Git provider not found" });
+		}
+		await assertGitProviderAccess(session, provider.gitProvider);
 	}
 };

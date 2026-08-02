@@ -7,10 +7,9 @@ function prepareDefine(config: DotenvParseOutput | undefined) {
 	const define = {};
 	// @ts-ignore
 	for (const [key, value] of Object.entries(config)) {
-		// Skip DATABASE_URL to allow runtime environment variable override
-		if (key === "DATABASE_URL") {
-			continue;
-		}
+		// Runtime configuration and credentials must never be compiled into the
+		// bundle. NODE_ENV is the only safe compile-time constant in this file.
+		if (key !== "NODE_ENV") continue;
 		// @ts-ignore
 		define[`process.env.${key}`] = JSON.stringify(value);
 	}
@@ -29,6 +28,8 @@ try {
 				"reset-password": "reset-password.ts",
 				"reset-2fa": "reset-2fa.ts",
 				"migrate-auth-secret": "scripts/migrate-auth-secret.ts",
+				"migrate-encryption-key": "scripts/migrate-encryption-key.ts",
+				"cutback-encryption-key": "scripts/cutback-encryption-key.ts",
 			},
 			bundle: true,
 			platform: "node",

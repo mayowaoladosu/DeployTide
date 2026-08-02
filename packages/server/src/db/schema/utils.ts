@@ -5,9 +5,9 @@ import { customType } from "drizzle-orm/pg-core";
 import { customAlphabet } from "nanoid";
 
 /**
- * Text column encrypted at rest (AES-256-GCM, key derived from
- * BETTER_AUTH_SECRET). Legacy plaintext values are passed through on read
- * and get encrypted the next time they are written.
+ * Text column encrypted at rest with the versioned encryption keyring.
+ * Legacy plaintext values are passed through during migration, but malformed
+ * or undecryptable authenticated ciphertext fails closed.
  */
 export const encryptedText = customType<{ data: string; driverData: string }>({
 	dataType() {
@@ -17,19 +17,30 @@ export const encryptedText = customType<{ data: string; driverData: string }>({
 		return encryptValue(value);
 	},
 	fromDriver(value) {
-		try {
-			return decryptValue(value);
-		} catch {
-			// Fail open so a key mismatch (e.g. restoring a backup under a
-			// different BETTER_AUTH_SECRET) degrades to showing ciphertext
-			// instead of breaking every query that touches the row.
-			console.error(
-				"Failed to decrypt an encrypted column; returning the raw value. This usually means BETTER_AUTH_SECRET changed after the value was encrypted.",
-			);
-			return value;
-		}
+		return decryptValue(value);
 	},
 });
+
+export const encryptedJson = <T>(name: string) =>
+	customType<{ data: T; driverData: string }>({
+		dataType() {
+			return "jsonb";
+		},
+		toDriver(value) {
+			return JSON.stringify(encryptValue(JSON.stringify(value)));
+		},
+		fromDriver(value) {
+			if (typeof value !== "string") {
+				if (process.env.DEPLOYTIDE_LEGACY_DECRYPTION === "disabled") {
+					throw new Error(
+						"Refusing plaintext JSON after the legacy encryption migration window was disabled.",
+					);
+				}
+				return value as T;
+			}
+			return JSON.parse(decryptValue(value)) as T;
+		},
+	})(name);
 
 const alphabet = "abcdefghijklmnopqrstuvwxyz123456789";
 

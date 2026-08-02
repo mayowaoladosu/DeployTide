@@ -17,6 +17,7 @@ import {
 	checkPermission,
 	findMemberByUserId,
 } from "@dokploy/server/services/permission";
+import { assertWorkspaceResource } from "@dokploy/server/services/tenancy";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, ilike, or, sql } from "drizzle-orm";
 import { z } from "zod";
@@ -80,6 +81,11 @@ export const environmentRouter = createTRPCRouter({
 		.input(apiFindOneEnvironment)
 		.query(async ({ input, ctx }) => {
 			const environment = await findEnvironmentById(input.environmentId);
+			assertWorkspaceResource(
+				ctx.session.activeOrganizationId,
+				environment,
+				"Environment",
+			);
 			if (
 				environment.project.organizationId !== ctx.session.activeOrganizationId
 			) {
@@ -166,6 +172,11 @@ export const environmentRouter = createTRPCRouter({
 		.mutation(async ({ input, ctx }) => {
 			try {
 				const environment = await findEnvironmentById(input.environmentId);
+				assertWorkspaceResource(
+					ctx.session.activeOrganizationId,
+					environment,
+					"Environment",
+				);
 				if (
 					environment.project.organizationId !==
 					ctx.session.activeOrganizationId
@@ -220,6 +231,11 @@ export const environmentRouter = createTRPCRouter({
 				}
 
 				const currentEnvironment = await findEnvironmentById(environmentId);
+				assertWorkspaceResource(
+					ctx.session.activeOrganizationId,
+					currentEnvironment,
+					"Environment",
+				);
 
 				if (currentEnvironment.isDefault && updateData.name !== undefined) {
 					throw new TRPCError({
@@ -280,6 +296,11 @@ export const environmentRouter = createTRPCRouter({
 			try {
 				await checkEnvironmentAccess(ctx, input.environmentId, "read");
 				const environment = await findEnvironmentById(input.environmentId);
+				assertWorkspaceResource(
+					ctx.session.activeOrganizationId,
+					environment,
+					"Environment",
+				);
 				if (
 					environment.project.organizationId !==
 					ctx.session.activeOrganizationId

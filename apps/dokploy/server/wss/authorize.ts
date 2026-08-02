@@ -1,4 +1,9 @@
-import { getAccessibleServerIds } from "@dokploy/server";
+import {
+	findWorkspaceServiceRuntime,
+	getAccessibleServerIds,
+	getContainersByAppNameMatch,
+	getServiceContainersByAppName,
+} from "@dokploy/server";
 import {
 	checkServiceAccess,
 	findMemberByUserId,
@@ -7,6 +12,11 @@ import {
 
 type WssUser = { id: string } | null | undefined;
 type WssSession = { activeOrganizationId?: string | null } | null | undefined;
+
+const operatorSocketsOnly = () =>
+	process.env.IS_CLOUD === "true" ||
+	process.env.DEPLOYTIDE_CLOUD === "true" ||
+	process.env.DOKPLOY_CLOUD === "true";
 
 const buildCtx = (user: { id: string }, activeOrganizationId: string) => ({
 	user: { id: user.id },
@@ -24,6 +34,8 @@ export const canAccessDockerOverWss = async (
 	session: WssSession,
 	serverId?: string | null,
 	serviceId?: string | null,
+	containerId?: string | null,
+	runType?: string | null,
 ): Promise<boolean> => {
 	if (!user || !session?.activeOrganizationId) return false;
 
@@ -38,11 +50,53 @@ export const canAccessDockerOverWss = async (
 	if (serviceId) {
 		try {
 			await checkServiceAccess(ctx, serviceId, "read");
+			const runtime = await findWorkspaceServiceRuntime(
+				session.activeOrganizationId,
+				serviceId,
+			);
+			if (
+				serverId &&
+				serverId !== "local" &&
+				serverId !== runtime.serverId
+			) {
+				return false;
+			}
+			if (containerId) {
+				const containers =
+					runType === "swarm"
+						? await getServiceContainersByAppName(
+								runtime.appName,
+								runtime.serverId ?? undefined,
+							)
+						: runType
+							? await getContainersByAppNameMatch(
+									runtime.appName,
+									undefined,
+									runtime.serverId ?? undefined,
+								)
+							: (
+									await Promise.all([
+										getContainersByAppNameMatch(
+											runtime.appName,
+											undefined,
+											runtime.serverId ?? undefined,
+										),
+										getServiceContainersByAppName(
+											runtime.appName,
+											runtime.serverId ?? undefined,
+										),
+									])
+								).flat();
+				if (!containers.some((container) => container.containerId === containerId)) {
+					return false;
+				}
+			}
 			return true;
 		} catch {
 			return false;
 		}
 	}
+	if (operatorSocketsOnly()) return false;
 
 	// Generic Docker overview (no service context): mirror the docker tRPC router
 	// — require the docker permission and access to the target server.
@@ -68,6 +122,7 @@ export const canAccessTerminalOverWss = async (
 	serverId?: string | null,
 ): Promise<boolean> => {
 	if (!user || !session?.activeOrganizationId) return false;
+	if (operatorSocketsOnly()) return false;
 
 	if (serverId && serverId !== "local") {
 		const accessible = await getAccessibleServerIds({

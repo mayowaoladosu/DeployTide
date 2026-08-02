@@ -29,6 +29,10 @@ export const setupDockerContainerTerminalWebSocketServer = (
 
 	// eslint-disable-next-line @typescript-eslint/no-misused-promises
 	wssTerm.on("connection", async (ws, req) => {
+		if (IS_CLOUD) {
+			ws.close(4003, "Container terminals are operator-only");
+			return;
+		}
 		const url = new URL(req.url || "", `http://${req.headers.host}`);
 		const containerId = url.searchParams.get("containerId");
 		const activeWay = url.searchParams.get("activeWay");
@@ -61,7 +65,15 @@ export const setupDockerContainerTerminalWebSocketServer = (
 			return;
 		}
 
-		if (!(await canAccessDockerOverWss(user, session, serverId, serviceId))) {
+		if (
+			!(await canAccessDockerOverWss(
+				user,
+				session,
+				serverId,
+				serviceId,
+				containerId,
+			))
+		) {
 			ws.close(4003, "Not authorized");
 			return;
 		}

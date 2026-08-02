@@ -14,6 +14,7 @@ import { eq, getTableColumns } from "drizzle-orm";
 import { quote } from "shell-quote";
 import type { z } from "zod";
 import { validUniqueServerAppName } from "./project";
+import { resolveEnvironmentOwnership } from "./tenancy";
 
 export type Libsql = typeof libsql.$inferSelect;
 
@@ -28,26 +29,30 @@ export const createLibsql = async (input: z.infer<typeof apiCreateLibsql>) => {
 		});
 	}
 
-	const newLibsql = await db
-		.insert(libsql)
-		.values({
-			...input,
-			databasePassword: input.databasePassword
-				? input.databasePassword
-				: generatePassword(),
-			appName,
-		})
-		.returning()
-		.then((value) => value[0]);
-
-	if (!newLibsql) {
-		throw new TRPCError({
-			code: "BAD_REQUEST",
-			message: "Error input: Inserting libsql database",
-		});
-	}
-
-	return newLibsql;
+	return db.transaction(async (transaction) => {
+		const ownership = await resolveEnvironmentOwnership(
+			transaction,
+			input.environmentId,
+		);
+		const [newLibsql] = await transaction
+			.insert(libsql)
+			.values({
+				...input,
+				...ownership,
+				databasePassword: input.databasePassword
+					? input.databasePassword
+					: generatePassword(),
+				appName,
+			})
+			.returning();
+		if (!newLibsql) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "Error input: Inserting libsql database",
+			});
+		}
+		return newLibsql;
+	});
 };
 
 // https://github.com/drizzle-team/drizzle-orm/discussions/1483#discussioncomment-7523881

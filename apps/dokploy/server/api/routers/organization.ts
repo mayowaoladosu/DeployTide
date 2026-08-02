@@ -3,9 +3,10 @@ import {
 	getDeployTideUrl,
 	IS_CLOUD,
 	sendInvitationEmail,
+	softDeleteWorkspace,
 } from "@dokploy/server/index";
 import { TRPCError } from "@trpc/server";
-import { and, desc, eq, exists } from "drizzle-orm";
+import { and, desc, eq, exists, isNull } from "drizzle-orm";
 import { nanoid } from "nanoid";
 import { z } from "zod";
 import { audit } from "@/server/api/utils/audit";
@@ -80,7 +81,9 @@ export const organizationRouter = createTRPCRouter({
 	all: protectedProcedure.query(async ({ ctx }) => {
 		const memberResult = await db.query.organization.findMany({
 			where: (organization) =>
-				exists(
+				and(
+					isNull(organization.deletedAt),
+					exists(
 					db
 						.select()
 						.from(member)
@@ -90,6 +93,7 @@ export const organizationRouter = createTRPCRouter({
 								eq(member.userId, ctx.user.id),
 							),
 						),
+					),
 				),
 			with: {
 				members: {
@@ -122,7 +126,10 @@ export const organizationRouter = createTRPCRouter({
 			}
 
 			return await db.query.organization.findFirst({
-				where: eq(organization.id, input.organizationId),
+				where: and(
+					eq(organization.id, input.organizationId),
+					isNull(organization.deletedAt),
+				),
 			});
 		}),
 	update: protectedProcedure
@@ -136,7 +143,10 @@ export const organizationRouter = createTRPCRouter({
 		.mutation(async ({ ctx, input }) => {
 			// First, verify the organization exists
 			const org = await db.query.organization.findFirst({
-				where: eq(organization.id, input.organizationId),
+				where: and(
+					eq(organization.id, input.organizationId),
+					isNull(organization.deletedAt),
+				),
 			});
 
 			if (!org) {
@@ -198,7 +208,10 @@ export const organizationRouter = createTRPCRouter({
 		.mutation(async ({ ctx, input }) => {
 			// First, verify the organization exists
 			const org = await db.query.organization.findFirst({
-				where: eq(organization.id, input.organizationId),
+				where: and(
+					eq(organization.id, input.organizationId),
+					isNull(organization.deletedAt),
+				),
 			});
 
 			if (!org) {
@@ -236,7 +249,10 @@ export const organizationRouter = createTRPCRouter({
 			}
 
 			const ownerOrgs = await db.query.organization.findMany({
-				where: eq(organization.ownerId, ctx.user.id),
+				where: and(
+					eq(organization.ownerId, ctx.user.id),
+					isNull(organization.deletedAt),
+				),
 			});
 
 			if (ownerOrgs.length <= 1) {
@@ -247,9 +263,7 @@ export const organizationRouter = createTRPCRouter({
 				});
 			}
 
-			const result = await db
-				.delete(organization)
-				.where(eq(organization.id, input.organizationId));
+			const result = await softDeleteWorkspace(input.organizationId);
 
 			await audit(ctx, {
 				action: "delete",
@@ -332,7 +346,10 @@ export const organizationRouter = createTRPCRouter({
 				const inviteLink = `${host}/invitation?token=${created.id}`;
 
 				const org = await db.query.organization.findFirst({
-					where: eq(organization.id, orgId),
+					where: and(
+						eq(organization.id, orgId),
+						isNull(organization.deletedAt),
+					),
 				});
 
 				await sendInvitationEmail({
@@ -512,7 +529,10 @@ export const organizationRouter = createTRPCRouter({
 		}
 
 		return await db.query.organization.findFirst({
-			where: eq(organization.id, ctx.session.activeOrganizationId),
+			where: and(
+				eq(organization.id, ctx.session.activeOrganizationId),
+				isNull(organization.deletedAt),
+			),
 		});
 	}),
 });

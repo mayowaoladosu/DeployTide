@@ -66,16 +66,31 @@ export const findGithubById = async (githubId: string) => {
 
 export const updateGithub = async (
 	githubId: string,
+	organizationId: string,
 	input: Partial<Github>,
+	providerData?: { name: string },
 ) => {
-	return await db
-		.update(github)
-		.set({
-			...input,
-		})
-		.where(eq(github.githubId, githubId))
-		.returning()
-		.then((response) => response[0]);
+	return db.transaction(async (transaction) => {
+		const current = await transaction.query.github.findFirst({
+			where: eq(github.githubId, githubId),
+			with: { gitProvider: true },
+		});
+		if (!current || current.gitProvider.organizationId !== organizationId) {
+			throw new TRPCError({ code: "NOT_FOUND", message: "Github Provider not found" });
+		}
+		if (providerData) {
+			await transaction
+				.update(gitProvider)
+				.set(providerData)
+				.where(eq(gitProvider.gitProviderId, current.gitProviderId));
+		}
+		const [updated] = await transaction
+			.update(github)
+			.set(input)
+			.where(eq(github.githubId, githubId))
+			.returning();
+		return updated;
+	});
 };
 
 export const getIssueComment = (

@@ -3,15 +3,19 @@ import { relations } from "drizzle-orm";
 import {
 	bigint,
 	boolean,
+	foreignKey,
 	integer,
 	json,
 	pgEnum,
 	pgTable,
 	text,
+	timestamp,
+	uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { organization } from "./account";
 import { bitbucket } from "./bitbucket";
 import { deployments } from "./deployment";
 import { domains } from "./domain";
@@ -23,6 +27,7 @@ import { mounts } from "./mount";
 import { patch } from "./patch";
 import { ports } from "./port";
 import { previewDeployments } from "./preview-deployments";
+import { projects } from "./project";
 import { redirects } from "./redirects";
 import { registry } from "./registry";
 import { security } from "./security";
@@ -122,7 +127,8 @@ export const applications = pgTable("application", {
 	command: text("command"),
 	args: text("args").array(),
 	icon: text("icon"),
-	refreshToken: text("refreshToken").$defaultFn(() => nanoid()),
+	refreshToken: encryptedText("refreshToken").$defaultFn(() => nanoid()),
+	refreshTokenDigest: text("refreshTokenDigest"),
 	sourceType: sourceType("sourceType").notNull().default("github"),
 	cleanCache: boolean("cleanCache").default(false),
 	// Github
@@ -152,7 +158,7 @@ export const applications = pgTable("application", {
 	bitbucketBuildPath: text("bitbucketBuildPath").default("/"),
 	// Docker
 	username: text("username"),
-	password: text("password"),
+	password: encryptedText("password"),
 	dockerImage: text("dockerImage"),
 	registryUrl: text("registryUrl"),
 	// Git
@@ -209,6 +215,13 @@ export const applications = pgTable("application", {
 	environmentId: text("environmentId")
 		.notNull()
 		.references(() => environments.environmentId, { onDelete: "cascade" }),
+	organizationId: text("organizationId")
+		.notNull()
+		.references(() => organization.id, { onDelete: "cascade" }),
+	projectId: text("projectId")
+		.notNull()
+		.references(() => projects.projectId, { onDelete: "cascade" }),
+	deletedAt: timestamp("deletedAt", { withTimezone: true }),
 	githubId: text("githubId").references(() => github.githubId, {
 		onDelete: "set null",
 	}),
@@ -237,11 +250,40 @@ export const applications = pgTable("application", {
 	detachDokployNetwork: boolean("detachDokployNetwork")
 		.notNull()
 		.default(false),
-});
+}, (table) => [
+	uniqueIndex("application_id_organization_project_environment_unique").on(
+		table.applicationId,
+		table.organizationId,
+		table.projectId,
+		table.environmentId,
+	),
+	foreignKey({
+		name: "application_project_organization_fk",
+		columns: [table.projectId, table.organizationId],
+		foreignColumns: [projects.projectId, projects.organizationId],
+	}).onDelete("cascade"),
+	foreignKey({
+		name: "application_environment_project_organization_fk",
+		columns: [table.environmentId, table.projectId, table.organizationId],
+		foreignColumns: [
+			environments.environmentId,
+			environments.projectId,
+			environments.organizationId,
+		],
+	}).onDelete("cascade"),
+]);
 
 export const applicationsRelations = relations(
 	applications,
 	({ one, many }) => ({
+		organization: one(organization, {
+			fields: [applications.organizationId],
+			references: [organization.id],
+		}),
+		project: one(projects, {
+			fields: [applications.projectId],
+			references: [projects.projectId],
+		}),
 		environment: one(environments, {
 			fields: [applications.environmentId],
 			references: [environments.environmentId],
@@ -546,8 +588,49 @@ export const apiFindMonitoringStats = z.object({
 });
 
 export const apiUpdateApplication = createSchema
-	.partial()
-	.extend({
-		applicationId: z.string().min(1),
+	.pick({
+		name: true,
+		description: true,
+		memoryReservation: true,
+		memoryLimit: true,
+		cpuReservation: true,
+		cpuLimit: true,
+		replicas: true,
+		command: true,
+		args: true,
+		icon: true,
+		buildServerId: true,
+		buildRegistryId: true,
+		autoDeploy: true,
+		cleanCache: true,
+		previewEnv: true,
+		previewLabels: true,
+		previewBuildArgs: true,
+		previewBuildSecrets: true,
+		previewWildcard: true,
+		previewPort: true,
+		previewHttps: true,
+		previewPath: true,
+		previewCertificateType: true,
+		previewCustomCertResolver: true,
+		previewLimit: true,
+		isPreviewDeploymentsActive: true,
+		previewRequireCollaboratorPermissions: true,
+		rollbackActive: true,
+		rollbackRegistryId: true,
+		healthCheckSwarm: true,
+		restartPolicySwarm: true,
+		placementSwarm: true,
+		updateConfigSwarm: true,
+		rollbackConfigSwarm: true,
+		modeSwarm: true,
+		labelsSwarm: true,
+		networkSwarm: true,
+		stopGracePeriodSwarm: true,
+		endpointSpecSwarm: true,
+		ulimitsSwarm: true,
+		networkIds: true,
+		detachDokployNetwork: true,
 	})
-	.omit({ serverId: true });
+	.partial()
+	.extend({ applicationId: z.string().min(1) });

@@ -1,27 +1,57 @@
 import { relations } from "drizzle-orm";
 import {
 	type AnyPgColumn,
+	bigint,
 	boolean,
+	foreignKey,
+	index,
+	jsonb,
 	pgEnum,
 	pgTable,
 	text,
+	timestamp,
+	uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
 import { z } from "zod";
+import { organization } from "./account";
 import { applications } from "./application";
 import { backups } from "./backups";
 import { compose } from "./compose";
+import { configurationSnapshots } from "./configuration-snapshot";
+import { environments } from "./environment";
 import { previewDeployments } from "./preview-deployments";
+import { projects } from "./project";
 import { rollbacks } from "./rollbacks";
 import { schedules } from "./schedule";
 import { server } from "./server";
 import { volumeBackups } from "./volume-backups";
 export const deploymentStatus = pgEnum("deploymentStatus", [
+	"queued",
+	"preparing",
+	"building",
+	"deploying",
+	"checking",
+	"ready",
+	"failed",
+	"cancelling",
 	"running",
 	"done",
 	"error",
 	"cancelled",
+]);
+
+export const deploymentTrigger = pgEnum("deploymentTrigger", [
+	"git_push",
+	"git_pull_request",
+	"manual",
+	"cli",
+	"api",
+	"import",
+	"redeploy",
+	"rollback",
+	"schedule",
 ]);
 
 export const deployments = pgTable("deployment", {
@@ -29,9 +59,36 @@ export const deployments = pgTable("deployment", {
 		.notNull()
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
+	organizationId: text("organizationId").references(() => organization.id, {
+		onDelete: "cascade",
+	}),
+	projectId: text("projectId").references(() => projects.projectId, {
+		onDelete: "cascade",
+	}),
+	environmentId: text("environmentId").references(
+		() => environments.environmentId,
+		{ onDelete: "cascade" },
+	),
 	title: text("title").notNull(),
 	description: text("description"),
 	status: deploymentStatus("status").default("running"),
+	trigger: deploymentTrigger("trigger"),
+	sourceProvider: text("sourceProvider"),
+	sourceRevision: text("sourceRevision"),
+	sourceBranch: text("sourceBranch"),
+	sourceAuthor: text("sourceAuthor"),
+	sourceMessage: text("sourceMessage"),
+	desiredSequence: bigint("desiredSequence", { mode: "number" })
+		.notNull()
+		.default(0),
+	immutableUrl: text("immutableUrl"),
+	sourceConfigSnapshot: jsonb("sourceConfigSnapshot").$type<Record<string, unknown>>(),
+	buildConfigSnapshot: jsonb("buildConfigSnapshot").$type<Record<string, unknown>>(),
+	runtimeConfigSnapshot: jsonb("runtimeConfigSnapshot").$type<Record<string, unknown>>(),
+	configurationSnapshotId: text("configurationSnapshotId").references(
+		() => configurationSnapshots.configurationSnapshotId,
+		{ onDelete: "restrict" },
+	),
 	logPath: text("logPath").notNull(),
 	pid: text("pid"),
 	applicationId: text("applicationId").references(
@@ -55,6 +112,8 @@ export const deployments = pgTable("deployment", {
 	startedAt: text("startedAt"),
 	finishedAt: text("finishedAt"),
 	errorMessage: text("errorMessage"),
+	errorCode: text("errorCode"),
+	deletedAt: timestamp("deletedAt", { withTimezone: true }),
 	scheduleId: text("scheduleId").references(
 		(): AnyPgColumn => schedules.scheduleId,
 		{ onDelete: "cascade" },
@@ -64,7 +123,7 @@ export const deployments = pgTable("deployment", {
 	}),
 	rollbackId: text("rollbackId").references(
 		(): AnyPgColumn => rollbacks.rollbackId,
-		{ onDelete: "cascade" },
+		{ onDelete: "set null" },
 	),
 	volumeBackupId: text("volumeBackupId").references(
 		(): AnyPgColumn => volumeBackups.volumeBackupId,
@@ -73,9 +132,110 @@ export const deployments = pgTable("deployment", {
 	buildServerId: text("buildServerId").references(() => server.serverId, {
 		onDelete: "cascade",
 	}),
-});
+}, (table) => [
+	index("deployment_org_created_idx").on(table.organizationId, table.createdAt),
+	index("deployment_project_environment_idx").on(
+		table.projectId,
+		table.environmentId,
+		table.createdAt,
+	),
+	index("deployment_status_idx").on(table.status),
+	index("deployment_source_revision_idx").on(
+		table.projectId,
+		table.sourceRevision,
+	),
+	index("deployment_configuration_snapshot_idx").on(
+		table.configurationSnapshotId,
+	),
+	uniqueIndex("deployment_id_organization_project_environment_unique").on(
+		table.deploymentId,
+		table.organizationId,
+		table.projectId,
+		table.environmentId,
+	),
+	uniqueIndex("deployment_id_organization_project_unique").on(
+		table.deploymentId,
+		table.organizationId,
+		table.projectId,
+	),
+	foreignKey({
+		name: "deployment_configuration_snapshot_ownership_fk",
+		columns: [
+			table.configurationSnapshotId,
+			table.organizationId,
+			table.projectId,
+			table.environmentId,
+		],
+		foreignColumns: [
+			configurationSnapshots.configurationSnapshotId,
+			configurationSnapshots.organizationId,
+			configurationSnapshots.projectId,
+			configurationSnapshots.environmentId,
+		],
+	}).onDelete("restrict"),
+	foreignKey({
+		name: "deployment_project_organization_fk",
+		columns: [table.projectId, table.organizationId],
+		foreignColumns: [projects.projectId, projects.organizationId],
+	}).onDelete("cascade"),
+	foreignKey({
+		name: "deployment_environment_project_organization_fk",
+		columns: [table.environmentId, table.projectId, table.organizationId],
+		foreignColumns: [
+			environments.environmentId,
+			environments.projectId,
+			environments.organizationId,
+		],
+	}).onDelete("cascade"),
+	foreignKey({
+		name: "deployment_application_ownership_fk",
+		columns: [
+			table.applicationId,
+			table.organizationId,
+			table.projectId,
+			table.environmentId,
+		],
+		foreignColumns: [
+			applications.applicationId,
+			applications.organizationId,
+			applications.projectId,
+			applications.environmentId,
+		],
+	}).onDelete("cascade"),
+	foreignKey({
+		name: "deployment_preview_ownership_fk",
+		columns: [
+			table.previewDeploymentId,
+			table.organizationId,
+			table.projectId,
+			table.environmentId,
+		],
+		foreignColumns: [
+			previewDeployments.previewDeploymentId,
+			previewDeployments.organizationId,
+			previewDeployments.projectId,
+			previewDeployments.environmentId,
+		],
+	}).onDelete("cascade"),
+]);
 
 export const deploymentsRelations = relations(deployments, ({ one }) => ({
+	configurationSnapshot: one(configurationSnapshots, {
+		fields: [deployments.configurationSnapshotId],
+		references: [configurationSnapshots.configurationSnapshotId],
+	}),
+	organization: one(organization, {
+		fields: [deployments.organizationId],
+		references: [organization.id],
+	}),
+	project: one(projects, {
+		fields: [deployments.projectId],
+		references: [projects.projectId],
+	}),
+	environment: one(environments, {
+		fields: [deployments.environmentId],
+		references: [environments.environmentId],
+	}),
 	application: one(applications, {
 		fields: [deployments.applicationId],
 		references: [applications.applicationId],

@@ -17,12 +17,12 @@ import { TRPCError } from "@trpc/server";
 import { z } from "zod";
 import { audit } from "@/server/api/utils/audit";
 import { uploadFileToContainerSchema } from "@/utils/schema";
-import { createTRPCRouter, withPermission } from "../trpc";
+import { createTRPCRouter, operatorProcedure } from "../trpc";
 
 export const containerIdRegex = /^[a-zA-Z0-9.\-_]+$/;
 
 export const dockerRouter = createTRPCRouter({
-	getContainers: withPermission("docker", "read")
+	getContainers: operatorProcedure
 		.input(
 			z.object({
 				serverId: z.string().optional(),
@@ -38,7 +38,7 @@ export const dockerRouter = createTRPCRouter({
 			return await getContainers(input.serverId);
 		}),
 
-	restartContainer: withPermission("docker", "read")
+	restartContainer: operatorProcedure
 		.input(
 			z.object({
 				containerId: z
@@ -64,7 +64,7 @@ export const dockerRouter = createTRPCRouter({
 			});
 		}),
 
-	startContainer: withPermission("docker", "read")
+	startContainer: operatorProcedure
 		.input(
 			z.object({
 				containerId: z
@@ -90,7 +90,7 @@ export const dockerRouter = createTRPCRouter({
 			});
 		}),
 
-	stopContainer: withPermission("docker", "read")
+	stopContainer: operatorProcedure
 		.input(
 			z.object({
 				containerId: z
@@ -116,7 +116,7 @@ export const dockerRouter = createTRPCRouter({
 			});
 		}),
 
-	killContainer: withPermission("docker", "read")
+	killContainer: operatorProcedure
 		.input(
 			z.object({
 				containerId: z
@@ -142,7 +142,7 @@ export const dockerRouter = createTRPCRouter({
 			});
 		}),
 
-	removeContainer: withPermission("docker", "read")
+	removeContainer: operatorProcedure
 		.input(
 			z.object({
 				containerId: z
@@ -168,7 +168,7 @@ export const dockerRouter = createTRPCRouter({
 			});
 		}),
 
-	getConfig: withPermission("docker", "read")
+	getConfig: operatorProcedure
 		.input(
 			z.object({
 				containerId: z
@@ -188,7 +188,7 @@ export const dockerRouter = createTRPCRouter({
 			return await getConfig(input.containerId, input.serverId);
 		}),
 
-	getContainersByAppNameMatch: withPermission("service", "read")
+	getContainersByAppNameMatch: operatorProcedure
 		.input(
 			z.object({
 				appType: z.enum(["stack", "docker-compose"]).optional(),
@@ -210,7 +210,7 @@ export const dockerRouter = createTRPCRouter({
 			);
 		}),
 
-	getContainersByAppLabel: withPermission("docker", "read")
+	getContainersByAppLabel: operatorProcedure
 		.input(
 			z.object({
 				appName: z.string().min(1).regex(containerIdRegex, "Invalid app name."),
@@ -232,7 +232,7 @@ export const dockerRouter = createTRPCRouter({
 			);
 		}),
 
-	getStackContainersByAppName: withPermission("docker", "read")
+	getStackContainersByAppName: operatorProcedure
 		.input(
 			z.object({
 				appName: z.string().min(1).regex(containerIdRegex, "Invalid app name."),
@@ -249,7 +249,7 @@ export const dockerRouter = createTRPCRouter({
 			return await getStackContainersByAppName(input.appName, input.serverId);
 		}),
 
-	getServiceContainersByAppName: withPermission("docker", "read")
+	getServiceContainersByAppName: operatorProcedure
 		.input(
 			z.object({
 				appName: z.string().min(1).regex(containerIdRegex, "Invalid app name."),
@@ -266,7 +266,7 @@ export const dockerRouter = createTRPCRouter({
 			return await getServiceContainersByAppName(input.appName, input.serverId);
 		}),
 
-	uploadFileToContainer: withPermission("docker", "read")
+	uploadFileToContainer: operatorProcedure
 		.input(uploadFileToContainerSchema)
 		.mutation(async ({ input, ctx }) => {
 			if (input.serverId) {

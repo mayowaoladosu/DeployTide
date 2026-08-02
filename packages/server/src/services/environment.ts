@@ -2,21 +2,38 @@ import { db } from "@dokploy/server/db";
 import {
 	type apiCreateEnvironment,
 	type apiDuplicateEnvironment,
+	applications,
+	compose,
 	environments,
+	projects,
 } from "@dokploy/server/db/schema";
 import { TRPCError } from "@trpc/server";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, isNull } from "drizzle-orm";
 import type { z } from "zod";
 
 export type Environment = typeof environments.$inferSelect;
 
+const findProjectOrganizationId = async (projectId: string) => {
+	const project = await db.query.projects.findFirst({
+		where: eq(projects.projectId, projectId),
+		columns: { organizationId: true },
+	});
+	if (!project) {
+		throw new TRPCError({ code: "NOT_FOUND", message: "Project not found" });
+	}
+	return project.organizationId;
+};
+
 export const createEnvironment = async (
 	input: z.infer<typeof apiCreateEnvironment>,
 ) => {
+	const organizationId = await findProjectOrganizationId(input.projectId);
 	const newEnvironment = await db
 		.insert(environments)
 		.values({
 			...input,
+			organizationId,
+			kind: "custom",
 		})
 		.returning()
 		.then((value) => value[0]);
@@ -33,17 +50,27 @@ export const createEnvironment = async (
 
 export const findEnvironmentById = async (environmentId: string) => {
 	const environment = await db.query.environments.findFirst({
-		where: eq(environments.environmentId, environmentId),
+		where: and(
+			eq(environments.environmentId, environmentId),
+			isNull(environments.deletedAt),
+		),
 		columns: {
 			name: true,
 			description: true,
 			environmentId: true,
 			isDefault: true,
+			organizationId: true,
+			kind: true,
+			branchPattern: true,
+			protectionPolicy: true,
+			retentionDays: true,
+			deletedAt: true,
 			projectId: true,
 			env: true,
 		},
 		with: {
 			applications: {
+				where: isNull(applications.deletedAt),
 				with: {
 					server: {
 						columns: {
@@ -153,6 +180,7 @@ export const findEnvironmentById = async (environmentId: string) => {
 				},
 			},
 			compose: {
+				where: isNull(compose.deletedAt),
 				with: {
 					server: {
 						columns: {
@@ -212,10 +240,14 @@ export const findEnvironmentsByProjectId = async (projectId: string) => {
 	} as const;
 
 	const projectEnvironments = await db.query.environments.findMany({
-		where: eq(environments.projectId, projectId),
+		where: and(
+			eq(environments.projectId, projectId),
+			isNull(environments.deletedAt),
+		),
 		orderBy: asc(environments.createdAt),
 		with: {
 			applications: {
+				where: isNull(applications.deletedAt),
 				columns: { ...serviceColumns, applicationId: true, icon: true },
 				with: { server: { columns: { name: true } } },
 			},
@@ -240,6 +272,7 @@ export const findEnvironmentsByProjectId = async (projectId: string) => {
 				with: { server: { columns: { name: true } } },
 			},
 			compose: {
+				where: isNull(compose.deletedAt),
 				columns: {
 					...serviceColumns,
 					composeId: true,
@@ -295,8 +328,14 @@ export const deleteEnvironment = async (environmentId: string) => {
 		});
 	}
 	const deletedEnvironment = await db
-		.delete(environments)
-		.where(eq(environments.environmentId, environmentId))
+		.update(environments)
+		.set({ deletedAt: new Date() })
+		.where(
+			and(
+				eq(environments.environmentId, environmentId),
+				isNull(environments.deletedAt),
+			),
+		)
 		.returning()
 		.then((value) => value[0]);
 
@@ -312,7 +351,12 @@ export const updateEnvironmentById = async (
 		.set({
 			...environmentData,
 		})
-		.where(eq(environments.environmentId, environmentId))
+		.where(
+			and(
+				eq(environments.environmentId, environmentId),
+				isNull(environments.deletedAt),
+			),
+		)
 		.returning()
 		.then((res) => res[0]);
 
@@ -332,6 +376,11 @@ export const duplicateEnvironment = async (
 			name: input.name,
 			description: input.description || originalEnvironment.description,
 			projectId: originalEnvironment.projectId,
+			organizationId: originalEnvironment.organizationId,
+			kind: "custom",
+			branchPattern: originalEnvironment.branchPattern,
+			protectionPolicy: originalEnvironment.protectionPolicy,
+			retentionDays: originalEnvironment.retentionDays,
 			env: originalEnvironment.env,
 		})
 		.returning()
@@ -390,13 +439,16 @@ export const filterEnvironmentServices = <T extends EnvironmentWithServices>(
 });
 
 export const createProductionEnvironment = async (projectId: string) => {
+	const organizationId = await findProjectOrganizationId(projectId);
 	const newEnvironment = await db
 		.insert(environments)
 		.values({
 			name: "production",
 			description: "Production environment",
 			projectId,
+			organizationId,
 			isDefault: true,
+			kind: "production",
 		})
 		.returning()
 		.then((value) => value[0]);

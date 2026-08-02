@@ -16,6 +16,7 @@ import {
 	rebuildDatabase,
 	removeRedisById,
 	removeService,
+	resolveEnvironmentOwnership,
 	startService,
 	startServiceRemote,
 	stopService,
@@ -461,15 +462,24 @@ export const redisRouter = createTRPCRouter({
 			await checkServicePermissionAndAccess(ctx, input.redisId, {
 				service: ["create"],
 			});
-
-			const updatedRedis = await db
-				.update(redisTable)
-				.set({
-					environmentId: input.targetEnvironmentId,
-				})
-				.where(eq(redisTable.redisId, input.redisId))
-				.returning()
-				.then((res) => res[0]);
+			const updatedRedis = await db.transaction(async (transaction) => {
+				const ownership = await resolveEnvironmentOwnership(
+					transaction,
+					input.targetEnvironmentId,
+					ctx.session.activeOrganizationId,
+				);
+				return transaction
+					.update(redisTable)
+					.set(ownership)
+					.where(
+						and(
+							eq(redisTable.redisId, input.redisId),
+							eq(redisTable.organizationId, ctx.session.activeOrganizationId),
+						),
+					)
+					.returning()
+					.then((res) => res[0]);
+			});
 
 			if (!updatedRedis) {
 				throw new TRPCError({

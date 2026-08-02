@@ -1,7 +1,7 @@
 import { db } from "@dokploy/server/db";
 import { server } from "@dokploy/server/db/schema";
 import { getWebServerSettings } from "@dokploy/server/services/web-server-settings";
-import { eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { LOCAL_PARTITION } from "./in-memory-queue";
 
 /**
@@ -21,7 +21,10 @@ export const resolveBuildsConcurrency = async (
 		}
 
 		const currentServer = await db.query.server.findFirst({
-			where: eq(server.serverId, partition),
+			where: and(
+				eq(server.serverId, partition),
+				isNull(server.deletedAt),
+			),
 			columns: { buildsConcurrency: true },
 		});
 		return normalize(currentServer?.buildsConcurrency ?? 1);

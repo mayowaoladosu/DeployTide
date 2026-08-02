@@ -29,6 +29,10 @@ if (typeof window === "undefined") {
 }
 
 const baseApp: ApplicationNested = {
+	organizationId: "",
+	projectId: "",
+	deletedAt: null,
+	refreshTokenDigest: null,
 	railpackVersion: "0.15.4",
 	applicationId: "",
 	previewLabels: [],
@@ -75,7 +79,13 @@ const baseApp: ApplicationNested = {
 	previewWildcard: "",
 	environment: {
 		env: "",
+		organizationId: "",
 		isDefault: false,
+		kind: "custom",
+		branchPattern: null,
+		protectionPolicy: null,
+		retentionDays: 30,
+		deletedAt: null,
 		environmentId: "",
 		name: "",
 		createdAt: "",
@@ -84,6 +94,8 @@ const baseApp: ApplicationNested = {
 		project: {
 			env: "",
 			organizationId: "",
+			primaryApplicationId: null,
+			deletedAt: null,
 			name: "",
 			description: "",
 			createdAt: "",

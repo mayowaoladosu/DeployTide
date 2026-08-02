@@ -14,6 +14,7 @@ import { eq, getTableColumns } from "drizzle-orm";
 import { quote } from "shell-quote";
 import type { z } from "zod";
 import { validUniqueServerAppName } from "./project";
+import { resolveEnvironmentOwnership } from "./tenancy";
 
 export function getMountPath(dockerImage: string): string {
 	const versionMatch = dockerImage.match(/postgres:(\d+)/);
@@ -43,26 +44,30 @@ export const createPostgres = async (
 		});
 	}
 
-	const newPostgres = await db
-		.insert(postgres)
-		.values({
-			...input,
-			databasePassword: input.databasePassword
-				? input.databasePassword
-				: generatePassword(),
-			appName,
-		})
-		.returning()
-		.then((value) => value[0]);
-
-	if (!newPostgres) {
-		throw new TRPCError({
-			code: "BAD_REQUEST",
-			message: "Error input: Inserting postgresql database",
-		});
-	}
-
-	return newPostgres;
+	return db.transaction(async (transaction) => {
+		const ownership = await resolveEnvironmentOwnership(
+			transaction,
+			input.environmentId,
+		);
+		const [newPostgres] = await transaction
+			.insert(postgres)
+			.values({
+				...input,
+				...ownership,
+				databasePassword: input.databasePassword
+					? input.databasePassword
+					: generatePassword(),
+				appName,
+			})
+			.returning();
+		if (!newPostgres) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "Error input: Inserting postgresql database",
+			});
+		}
+		return newPostgres;
+	});
 };
 export const findPostgresById = async (postgresId: string) => {
 	const result = await db.query.postgres.findFirst({

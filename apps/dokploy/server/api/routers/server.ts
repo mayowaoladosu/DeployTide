@@ -20,12 +20,19 @@ import {
 import { db } from "@dokploy/server/db";
 import { TRPCError } from "@trpc/server";
 import { observable } from "@trpc/server/observable";
-import { and, desc, eq, getTableColumns, isNotNull, sql } from "drizzle-orm";
+import {
+	and,
+	desc,
+	eq,
+	getTableColumns,
+	isNotNull,
+	isNull,
+	sql,
+} from "drizzle-orm";
 import { z } from "zod";
 import {
 	createTRPCRouter,
-	protectedProcedure,
-	withPermission,
+	operatorProcedure,
 } from "@/server/api/trpc";
 import { audit } from "@/server/api/utils/audit";
 import {
@@ -48,7 +55,7 @@ import {
 import { applyDockerCleanupSchedule } from "@/server/utils/docker-cleanup";
 
 export const serverRouter = createTRPCRouter({
-	create: withPermission("server", "create")
+	create: operatorProcedure
 		.input(apiCreateServer)
 		.mutation(async ({ ctx, input }) => {
 			try {
@@ -85,7 +92,7 @@ export const serverRouter = createTRPCRouter({
 			}
 		}),
 
-	one: withPermission("server", "read")
+	one: operatorProcedure
 		.input(apiFindOneServer)
 		.query(async ({ input, ctx }) => {
 			const server = await findServerById(input.serverId);
@@ -106,14 +113,14 @@ export const serverRouter = createTRPCRouter({
 
 			return redactServerSshKey(server);
 		}),
-	getDefaultCommand: withPermission("server", "read")
+	getDefaultCommand: operatorProcedure
 		.input(apiFindOneServer)
 		.query(async ({ input }) => {
 			const server = await findServerById(input.serverId);
 			const isBuildServer = server.serverType === "build";
 			return defaultCommand(isBuildServer);
 		}),
-	all: withPermission("server", "read").query(async ({ ctx }) => {
+	all: operatorProcedure.query(async ({ ctx }) => {
 		const accessibleIds = await getAccessibleServerIds(ctx.session);
 
 		const result = await db
@@ -129,13 +136,18 @@ export const serverRouter = createTRPCRouter({
 			.leftJoin(mongo, eq(mongo.serverId, server.serverId))
 			.leftJoin(mysql, eq(mysql.serverId, server.serverId))
 			.leftJoin(postgres, eq(postgres.serverId, server.serverId))
-			.where(eq(server.organizationId, ctx.session.activeOrganizationId))
+			.where(
+				and(
+					eq(server.organizationId, ctx.session.activeOrganizationId),
+					isNull(server.deletedAt),
+				),
+			)
 			.orderBy(desc(server.createdAt))
 			.groupBy(server.serverId);
 
 		return result.filter((s) => accessibleIds.has(s.serverId));
 	}),
-	allForPermissions: withPermission("member", "update").query(async ({ ctx }) => {
+	allForPermissions: operatorProcedure.query(async ({ ctx }) => {
 			return await db.query.server.findMany({
 				columns: {
 					serverId: true,
@@ -144,14 +156,17 @@ export const serverRouter = createTRPCRouter({
 					serverType: true,
 				},
 				orderBy: desc(server.createdAt),
-				where: eq(server.organizationId, ctx.session.activeOrganizationId),
+				where: and(
+					eq(server.organizationId, ctx.session.activeOrganizationId),
+					isNull(server.deletedAt),
+				),
 			});
 		}),
-	count: protectedProcedure.query(async ({ ctx }) => {
+	count: operatorProcedure.query(async ({ ctx }) => {
 		const organizations = await db.query.organization.findMany({
 			where: eq(organization.ownerId, ctx.user.id),
 			with: {
-				servers: true,
+				servers: { where: isNull(server.deletedAt) },
 			},
 		});
 
@@ -159,7 +174,7 @@ export const serverRouter = createTRPCRouter({
 
 		return servers.length ?? 0;
 	}),
-	withSSHKey: withPermission("server", "read").query(async ({ ctx }) => {
+	withSSHKey: operatorProcedure.query(async ({ ctx }) => {
 		const accessibleIds = await getAccessibleServerIds(ctx.session);
 
 		const result = await db.query.server.findMany({
@@ -170,16 +185,18 @@ export const serverRouter = createTRPCRouter({
 						eq(server.organizationId, ctx.session.activeOrganizationId),
 						eq(server.serverStatus, "active"),
 						eq(server.serverType, "deploy"),
+						isNull(server.deletedAt),
 					)
 				: and(
 						isNotNull(server.sshKeyId),
 						eq(server.organizationId, ctx.session.activeOrganizationId),
 						eq(server.serverType, "deploy"),
+						isNull(server.deletedAt),
 					),
 		});
 		return result.filter((s) => accessibleIds.has(s.serverId));
 	}),
-	buildServers: withPermission("server", "read").query(async ({ ctx }) => {
+	buildServers: operatorProcedure.query(async ({ ctx }) => {
 		const accessibleIds = await getAccessibleServerIds(ctx.session);
 
 		const result = await db.query.server.findMany({
@@ -190,16 +207,18 @@ export const serverRouter = createTRPCRouter({
 						eq(server.organizationId, ctx.session.activeOrganizationId),
 						eq(server.serverStatus, "active"),
 						eq(server.serverType, "build"),
+						isNull(server.deletedAt),
 					)
 				: and(
 						isNotNull(server.sshKeyId),
 						eq(server.organizationId, ctx.session.activeOrganizationId),
 						eq(server.serverType, "build"),
+						isNull(server.deletedAt),
 					),
 		});
 		return result.filter((s) => accessibleIds.has(s.serverId));
 	}),
-	setup: withPermission("server", "create")
+	setup: operatorProcedure
 		.input(apiFindOneServer)
 		.mutation(async ({ input, ctx }) => {
 			try {
@@ -222,7 +241,7 @@ export const serverRouter = createTRPCRouter({
 				throw error;
 			}
 		}),
-	setupWithLogs: withPermission("server", "create")
+	setupWithLogs: operatorProcedure
 		.meta({
 			openapi: {
 				path: "/deploy/server-with-logs",
@@ -250,7 +269,7 @@ export const serverRouter = createTRPCRouter({
 				throw error;
 			}
 		}),
-	validate: withPermission("server", "read")
+	validate: operatorProcedure
 		.input(apiFindOneServer)
 		.query(async ({ input, ctx }) => {
 			try {
@@ -298,7 +317,7 @@ export const serverRouter = createTRPCRouter({
 			}
 		}),
 
-	security: withPermission("server", "read")
+	security: operatorProcedure
 		.input(apiFindOneServer)
 		.query(async ({ input, ctx }) => {
 			try {
@@ -348,7 +367,7 @@ export const serverRouter = createTRPCRouter({
 				});
 			}
 		}),
-	setupMonitoring: withPermission("server", "create")
+	setupMonitoring: operatorProcedure
 		.input(apiUpdateServerMonitoring)
 		.mutation(async ({ input, ctx }) => {
 			try {
@@ -396,7 +415,7 @@ export const serverRouter = createTRPCRouter({
 				throw error;
 			}
 		}),
-	remove: withPermission("server", "delete")
+	remove: operatorProcedure
 		.input(apiRemoveServer)
 		.mutation(async ({ input, ctx }) => {
 			try {
@@ -430,7 +449,7 @@ export const serverRouter = createTRPCRouter({
 				throw error;
 			}
 		}),
-	update: withPermission("server", "create")
+	update: operatorProcedure
 		.input(apiUpdateServer)
 		.mutation(async ({ input, ctx }) => {
 			try {
@@ -469,7 +488,7 @@ export const serverRouter = createTRPCRouter({
 				throw error;
 			}
 		}),
-	updateBuildsConcurrency: withPermission("server", "create")
+	updateBuildsConcurrency: operatorProcedure
 		.input(apiUpdateServerBuildsConcurrency)
 		.mutation(async ({ input, ctx }) => {
 			const currentServer = await findServerById(input.serverId);
@@ -483,14 +502,14 @@ export const serverRouter = createTRPCRouter({
 				buildsConcurrency: input.buildsConcurrency,
 			});
 		}),
-	publicIp: protectedProcedure.query(async () => {
+	publicIp: operatorProcedure.query(async () => {
 		if (IS_CLOUD) {
 			return "";
 		}
 		const ip = await getPublicIpWithFallback();
 		return ip;
 	}),
-	getServerTime: protectedProcedure.query(() => {
+	getServerTime: operatorProcedure.query(() => {
 		if (IS_CLOUD) {
 			return null;
 		}
@@ -499,7 +518,7 @@ export const serverRouter = createTRPCRouter({
 			timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
 		};
 	}),
-	getServerMetrics: withPermission("monitoring", "read")
+	getServerMetrics: operatorProcedure
 		.input(
 			z.object({
 				url: z.string(),

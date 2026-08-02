@@ -2,10 +2,10 @@ import { relations } from "drizzle-orm";
 import {
 	boolean,
 	integer,
-	jsonb,
 	pgEnum,
 	pgTable,
 	text,
+	timestamp,
 } from "drizzle-orm/pg-core";
 import { createInsertSchema } from "drizzle-zod";
 import { nanoid } from "nanoid";
@@ -24,7 +24,24 @@ import { postgres } from "./postgres";
 import { redis } from "./redis";
 import { schedules } from "./schedule";
 import { sshKeys } from "./ssh-key";
-import { generateAppName } from "./utils";
+import { encryptedJson, generateAppName } from "./utils";
+
+export interface ServerMetricsConfig {
+	server: {
+		type: "Dokploy" | "Remote";
+		refreshRate: number;
+		port: number;
+		token: string;
+		urlCallback: string;
+		retentionDays: number;
+		cronJob: string;
+		thresholds: { cpu: number; memory: number };
+	};
+	containers: {
+		refreshRate: number;
+		services: { include: string[]; exclude: string[] };
+	};
+}
 export const serverStatus = pgEnum("serverStatus", ["active", "inactive"]);
 export const serverType = pgEnum("serverType", ["deploy", "build"]);
 
@@ -48,57 +65,13 @@ export const server = pgTable("server", {
 		.notNull()
 		.references(() => organization.id, { onDelete: "cascade" }),
 	serverStatus: serverStatus("serverStatus").notNull().default("active"),
+	deletedAt: timestamp("deletedAt", { withTimezone: true }),
 	serverType: serverType("serverType").notNull().default("deploy"),
 	command: text("command").notNull().default(""),
 	sshKeyId: text("sshKeyId").references(() => sshKeys.sshKeyId, {
 		onDelete: "set null",
 	}),
-	metricsConfig: jsonb("metricsConfig")
-		.$type<{
-			server: {
-				type: "Dokploy" | "Remote";
-				refreshRate: number;
-				port: number;
-				token: string;
-				urlCallback: string;
-				retentionDays: number;
-				cronJob: string;
-				thresholds: {
-					cpu: number;
-					memory: number;
-				};
-			};
-			containers: {
-				refreshRate: number;
-				services: {
-					include: string[];
-					exclude: string[];
-				};
-			};
-		}>()
-		.notNull()
-		.default({
-			server: {
-				type: "Remote",
-				refreshRate: 60,
-				port: 4500,
-				token: "",
-				urlCallback: "",
-				cronJob: "",
-				retentionDays: 2,
-				thresholds: {
-					cpu: 0,
-					memory: 0,
-				},
-			},
-			containers: {
-				refreshRate: 60,
-				services: {
-					include: [],
-					exclude: [],
-				},
-			},
-		}),
+	metricsConfig: encryptedJson<ServerMetricsConfig>("metricsConfig").notNull(),
 });
 
 export const serverRelations = relations(server, ({ one, many }) => ({

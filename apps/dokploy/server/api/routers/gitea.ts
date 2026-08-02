@@ -8,7 +8,6 @@ import {
 	haveGiteaRequirements,
 	testGiteaConnection,
 	updateGitea,
-	updateGitProvider,
 } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
 import { TRPCError } from "@trpc/server";
@@ -59,7 +58,13 @@ export const giteaRouter = createTRPCRouter({
 		.query(async ({ input, ctx }) => {
 			const gitea = await findGiteaById(input.giteaId);
 			await assertGitProviderAccess(ctx.session, gitea.gitProvider);
-			return gitea;
+			const {
+				clientSecret: _clientSecret,
+				accessToken: _accessToken,
+				refreshToken: _refreshToken,
+				...safeGitea
+			} = gitea;
+			return safeGitea;
 		}),
 
 	giteaProviders: protectedProcedure.query(async ({ ctx }) => {
@@ -176,20 +181,16 @@ export const giteaRouter = createTRPCRouter({
 	update: withPermission("gitProviders", "create")
 		.input(apiUpdateGitea)
 		.mutation(async ({ input, ctx }) => {
-			if (input.name) {
-				await updateGitProvider(input.gitProviderId, {
-					name: input.name,
-					organizationId: ctx.session.activeOrganizationId,
-				});
-
-				await updateGitea(input.giteaId, {
-					...input,
-				});
-			} else {
-				await updateGitea(input.giteaId, {
-					...input,
-				});
-			}
+			const gitea = await findGiteaById(input.giteaId);
+			await assertGitProviderAccess(ctx.session, gitea.gitProvider);
+			await updateGitea(input.giteaId, ctx.session.activeOrganizationId, {
+				giteaUrl: input.giteaUrl,
+				giteaInternalUrl: input.giteaInternalUrl,
+				redirectUri: input.redirectUri,
+				clientId: input.clientId,
+				scopes: input.scopes,
+				...(input.clientSecret ? { clientSecret: input.clientSecret } : {}),
+			}, { name: input.name });
 
 			await audit(ctx, {
 				action: "update",
@@ -203,7 +204,7 @@ export const giteaRouter = createTRPCRouter({
 
 	getGiteaUrl: protectedProcedure
 		.input(apiFindOneGitea)
-		.query(async ({ input }) => {
+		.query(async ({ input, ctx }) => {
 			const { giteaId } = input;
 
 			if (!giteaId) {
@@ -214,6 +215,7 @@ export const giteaRouter = createTRPCRouter({
 			}
 
 			const giteaProvider = await findGiteaById(giteaId);
+			await assertGitProviderAccess(ctx.session, giteaProvider.gitProvider);
 
 			// Return the base URL of the Gitea instance
 			return giteaProvider.giteaUrl;
