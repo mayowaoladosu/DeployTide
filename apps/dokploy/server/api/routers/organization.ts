@@ -1,5 +1,9 @@
 import { db } from "@dokploy/server/db";
-import { IS_CLOUD, sendInvitationEmail } from "@dokploy/server/index";
+import {
+	getDeployTideUrl,
+	IS_CLOUD,
+	sendInvitationEmail,
+} from "@dokploy/server/index";
 import { TRPCError } from "@trpc/server";
 import { and, desc, eq, exists } from "drizzle-orm";
 import { nanoid } from "nanoid";
@@ -13,7 +17,6 @@ import {
 	invitation,
 	member,
 	organization,
-	organizationRole,
 	user,
 } from "@/server/db/schema";
 import { createTRPCRouter, protectedProcedure, withPermission } from "../trpc";
@@ -260,7 +263,7 @@ export const organizationRouter = createTRPCRouter({
 		.input(
 			z.object({
 				email: z.string().email(),
-				role: z.string().min(1),
+				role: z.enum(["admin", "member"]),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
@@ -308,31 +311,6 @@ export const organizationRouter = createTRPCRouter({
 				});
 			}
 
-			// Owner role is non-delegable — no one can invite as owner
-			if (input.role === "owner") {
-				throw new TRPCError({
-					code: "FORBIDDEN",
-					message: "Cannot invite a user with the owner role",
-				});
-			}
-
-			// If assigning a custom role, verify it exists
-			if (!["owner", "admin", "member"].includes(input.role)) {
-				const customRole = await db.query.organizationRole.findFirst({
-					where: and(
-						eq(organizationRole.organizationId, orgId),
-						eq(organizationRole.role, input.role),
-					),
-				});
-
-				if (!customRole) {
-					throw new TRPCError({
-						code: "NOT_FOUND",
-						message: `Role "${input.role}" not found`,
-					});
-				}
-			}
-
 			const [created] = await db
 				.insert(invitation)
 				.values({
@@ -350,7 +328,7 @@ export const organizationRouter = createTRPCRouter({
 				const host =
 					process.env.NODE_ENV === "development"
 						? "http://localhost:3000"
-						: "https://app.dokploy.com";
+						: await getDeployTideUrl();
 				const inviteLink = `${host}/invitation?token=${created.id}`;
 
 				const org = await db.query.organization.findFirst({
@@ -419,7 +397,7 @@ export const organizationRouter = createTRPCRouter({
 		.input(
 			z.object({
 				memberId: z.string(),
-				role: z.string().min(1),
+				role: z.enum(["admin", "member"]),
 			}),
 		)
 		.mutation(async ({ ctx, input }) => {
@@ -448,8 +426,8 @@ export const organizationRouter = createTRPCRouter({
 				});
 			}
 
-			// Owner role is nontransferable - cannot change to or from owner
-			if (target.role === "owner" || input.role === "owner") {
+			// Owner role is nontransferable.
+			if (target.role === "owner") {
 				throw new TRPCError({
 					code: "FORBIDDEN",
 					message: "The owner role is nontransferable",
@@ -464,26 +442,6 @@ export const organizationRouter = createTRPCRouter({
 					message:
 						"Only the organization owner can change admin roles. Admins can only modify member roles.",
 				});
-			}
-
-			// If assigning a custom role (not admin/member), verify it exists
-			if (input.role !== "admin" && input.role !== "member") {
-				const customRole = await db.query.organizationRole.findFirst({
-					where: and(
-						eq(
-							organizationRole.organizationId,
-							ctx.session.activeOrganizationId,
-						),
-						eq(organizationRole.role, input.role),
-					),
-				});
-
-				if (!customRole) {
-					throw new TRPCError({
-						code: "NOT_FOUND",
-						message: `Custom role "${input.role}" not found`,
-					});
-				}
 			}
 
 			// Update the target member's role

@@ -1,0 +1,12 @@
+DeployTide
+Copyright 2026 DeployTide contributors
+
+DeployTide is a LayerRail product.
+
+This product includes software developed by the Dokploy project
+(https://github.com/Dokploy/dokploy), Copyright 2026-present Dokploy
+Technology, Inc., and used under the Apache License, Version 2.0.
+
+DeployTide contains no source files from directories that the upstream project
+designated as proprietary or licensed under the Dokploy Source Available
+License.

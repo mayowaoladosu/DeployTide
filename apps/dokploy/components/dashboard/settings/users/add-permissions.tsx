@@ -3,7 +3,6 @@ import { useEffect, useState } from "react";
 import { useForm } from "react-hook-form";
 import { toast } from "sonner";
 import { z } from "zod";
-import { EnterpriseFeatureLocked } from "@/components/proprietary/enterprise-feature-gate";
 import { AlertBlock } from "@/components/shared/alert-block";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -190,27 +189,22 @@ type AddPermissions = z.infer<typeof addPermissions>;
 
 interface Props {
 	userId: string;
-	role?: string;
 }
 
-export const AddUserPermissions = ({ userId, role }: Props) => {
-	const isCustomRole = !!role && !["owner", "admin", "member"].includes(role);
+export const AddUserPermissions = ({ userId }: Props) => {
 	const [isOpen, setIsOpen] = useState(false);
 	const { data: projects } = api.project.allForPermissions.useQuery(undefined, {
 		enabled: isOpen,
 	});
-	const { data: haveValidLicense } =
-		api.licenseKey.haveValidLicenseKey.useQuery();
-
 	const { data: gitProviders } = api.gitProvider.allForPermissions.useQuery(
 		undefined,
 		{
-			enabled: isOpen && !!haveValidLicense,
+			enabled: isOpen,
 		},
 	);
 
 	const { data: servers } = api.server.allForPermissions.useQuery(undefined, {
-		enabled: isOpen && !!haveValidLicense,
+		enabled: isOpen,
 	});
 
 	const { data, refetch } = api.user.one.useQuery(
@@ -322,15 +316,7 @@ export const AddUserPermissions = ({ userId, role }: Props) => {
 						onSubmit={form.handleSubmit(onSubmit)}
 						className="grid  grid-cols-1 md:grid-cols-2  w-full gap-4"
 					>
-						{isCustomRole && (
-							<div className="md:col-span-2 rounded-lg border p-3 bg-muted/50 text-sm text-muted-foreground">
-								This user has a custom role assigned. Capabilities are defined
-								by the role. You can still manage which projects, environments,
-								and services they can access below.
-							</div>
-						)}
-						{!isCustomRole && (
-							<>
+						<>
 								<FormField
 									control={form.control}
 									name="canCreateProjects"
@@ -551,8 +537,7 @@ export const AddUserPermissions = ({ userId, role }: Props) => {
 										</FormItem>
 									)}
 								/>
-							</>
-						)}
+						</>
 						<FormField
 							control={form.control}
 							name="accessedProjects"
@@ -892,7 +877,7 @@ export const AddUserPermissions = ({ userId, role }: Props) => {
 								</FormItem>
 							)}
 						/>
-						{haveValidLicense ? (
+						{(
 							<FormField
 								control={form.control}
 								name="accessedGitProviders"
@@ -955,16 +940,8 @@ export const AddUserPermissions = ({ userId, role }: Props) => {
 									</FormItem>
 								)}
 							/>
-						) : (
-							<div className="md:col-span-2">
-								<EnterpriseFeatureLocked
-									compact
-									title="Git Provider Assignment"
-									description="Assign specific Git Providers to users with an Enterprise license."
-								/>
-							</div>
 						)}
-						{haveValidLicense ? (
+						{(
 							<FormField
 								control={form.control}
 								name="accessedServers"
@@ -1028,14 +1005,6 @@ export const AddUserPermissions = ({ userId, role }: Props) => {
 									</FormItem>
 								)}
 							/>
-						) : (
-							<div className="md:col-span-2">
-								<EnterpriseFeatureLocked
-									compact
-									title="Server Assignment"
-									description="Assign specific Servers to users with an Enterprise license."
-								/>
-							</div>
 						)}
 						<DialogFooter className="flex w-full flex-row justify-end md:col-span-2">
 							<Button

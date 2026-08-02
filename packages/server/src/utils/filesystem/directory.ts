@@ -1,4 +1,4 @@
-import fs, { promises as fsPromises } from "node:fs";
+import { promises as fsPromises } from "node:fs";
 import path from "node:path";
 import { paths } from "@dokploy/server/constants";
 import type { Application } from "@dokploy/server/services/application";
@@ -28,10 +28,17 @@ export const recreateDirectoryRemote = async (
 };
 
 export const removeDirectoryIfExistsContent = async (
-	path: string,
+	directoryPath: string,
 ): Promise<void> => {
-	if (fs.existsSync(path) && fs.readdirSync(path).length !== 0) {
-		await execAsync(`rm -rf ${path}`);
+	try {
+		const entries = await fsPromises.readdir(directoryPath);
+		if (entries.length > 0) {
+			await fsPromises.rm(directoryPath, { recursive: true, force: true });
+		}
+	} catch (error) {
+		if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+			throw error;
+		}
 	}
 };
 

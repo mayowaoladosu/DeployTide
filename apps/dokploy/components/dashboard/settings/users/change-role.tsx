@@ -34,7 +34,7 @@ import {
 import { api } from "@/utils/api";
 
 const changeRoleSchema = z.object({
-	role: z.string().min(1),
+	role: z.enum(["admin", "member"]),
 });
 
 type ChangeRoleSchema = z.infer<typeof changeRoleSchema>;
@@ -48,17 +48,14 @@ interface Props {
 export const ChangeRole = ({ memberId, currentRole, userEmail }: Props) => {
 	const [isOpen, setIsOpen] = useState(false);
 	const utils = api.useUtils();
-
-	const { data: customRoles } = api.customRole.all.useQuery(undefined, {
-		enabled: isOpen,
-	});
+	const isOwner = currentRole === "owner";
 
 	const { mutateAsync, isError, error, isPending } =
 		api.organization.updateMemberRole.useMutation();
 
 	const form = useForm<ChangeRoleSchema>({
 		defaultValues: {
-			role: currentRole,
+			role: currentRole === "admin" ? "admin" : "member",
 		},
 		resolver: zodResolver(changeRoleSchema),
 	});
@@ -66,7 +63,7 @@ export const ChangeRole = ({ memberId, currentRole, userEmail }: Props) => {
 	useEffect(() => {
 		if (isOpen) {
 			form.reset({
-				role: currentRole,
+				role: currentRole === "admin" ? "admin" : "member",
 			});
 		}
 	}, [form, currentRole, isOpen]);
@@ -85,6 +82,8 @@ export const ChangeRole = ({ memberId, currentRole, userEmail }: Props) => {
 				toast.error(error?.message || "Error updating role");
 			});
 	};
+
+	if (isOwner) return null;
 
 	return (
 		<Dialog open={isOpen} onOpenChange={setIsOpen}>
@@ -129,14 +128,6 @@ export const ChangeRole = ({ memberId, currentRole, userEmail }: Props) => {
 										<SelectContent>
 											<SelectItem value="admin">Admin</SelectItem>
 											<SelectItem value="member">Member</SelectItem>
-											{customRoles?.map((customRole) => (
-												<SelectItem
-													key={customRole.role}
-													value={customRole.role}
-												>
-													{customRole.role}
-												</SelectItem>
-											))}
 										</SelectContent>
 									</Select>
 									<FormDescription>
@@ -144,13 +135,6 @@ export const ChangeRole = ({ memberId, currentRole, userEmail }: Props) => {
 										<br />
 										<strong>Member:</strong> Limited permissions, can be
 										customized.
-										{customRoles && customRoles.length > 0 && (
-											<>
-												<br />
-												<strong>Custom roles:</strong> Enterprise-defined
-												permissions.
-											</>
-										)}
 										<br />
 										<em className="text-muted-foreground text-xs">
 											Note: Owner role is nontransferable.

@@ -35,16 +35,8 @@ vi.mock("@dokploy/server/db", () => ({
 				findFirst: vi.fn(() => Promise.resolve(memberToReturn)),
 				findMany: vi.fn(() => Promise.resolve([])),
 			},
-			organizationRole: {
-				findFirst: vi.fn(),
-				findMany: vi.fn(() => Promise.resolve([])),
-			},
 		},
 	},
-}));
-
-vi.mock("@dokploy/server/services/proprietary/license-key", () => ({
-	hasValidLicense: vi.fn(() => Promise.resolve(false)),
 }));
 
 const { checkPermission } = await import("@dokploy/server/services/permission");
@@ -58,7 +50,7 @@ beforeEach(() => {
 	vi.clearAllMocks();
 });
 
-describe("owner and admin bypass enterprise resources", () => {
+describe("owner and admin static permissions", () => {
 	it("owner bypasses deployment.read", async () => {
 		memberToReturn = mockMemberData("owner");
 		await expect(
@@ -85,7 +77,7 @@ describe("owner and admin bypass enterprise resources", () => {
 	});
 });
 
-describe("member is denied org-level enterprise resources (CVE: bypass via staticRoles)", () => {
+describe("member is denied workspace administration resources", () => {
 	it("member is denied registry.read", async () => {
 		memberToReturn = mockMemberData("member");
 		await expect(
@@ -111,13 +103,6 @@ describe("member is denied org-level enterprise resources (CVE: bypass via stati
 		memberToReturn = mockMemberData("member");
 		await expect(
 			checkPermission(ctx, { notification: ["read"] }),
-		).rejects.toThrow();
-	});
-
-	it("member is denied auditLog.read", async () => {
-		memberToReturn = mockMemberData("member");
-		await expect(
-			checkPermission(ctx, { auditLog: ["read"] }),
 		).rejects.toThrow();
 	});
 

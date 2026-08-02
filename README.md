@@ -1,64 +1,57 @@
-<div align="center">
-  <a href="https://dokploy.com">
-    <img src=".github/sponsors/logo.png" alt="Dokploy - Open Source Alternative to Vercel, Heroku and Netlify." width="100%"  />
-  </a>
-  </br>
-  </br>
-  <p>Join us on Discord for help, feedback, and discussions!</p>
-  <a href="https://discord.gg/2tBnJ3jDJc">
-    <img src="https://discordapp.com/api/guilds/1234073262418563112/widget.png?style=banner2" alt="Discord Shield"/>
-  </a>
-</div>
-<br />
+# DeployTide
 
+DeployTide is LayerRail's managed application-delivery platform. The customer
+model is source import, framework detection, immutable deployments, previews,
+promotion, domains, logs, rollback, usage, and billing. Compute infrastructure
+is operated by LayerRail and is not a customer-managed resource.
 
-Dokploy is a free, self-hostable Platform as a Service (PaaS) that simplifies the deployment and management of applications and databases.
+This repository is the standalone DeployTide codebase. It is in active
+development; no public service domain or installation endpoint is claimed by
+this document.
 
-## ✨ Features
+## Product principles
 
-Dokploy includes multiple features to make your life easier.
+- **Git to release** — turn a source revision and configuration snapshot into an
+  immutable release.
+- **Aliases, not rebuilds** — promote and roll back by moving traffic aliases
+  between existing releases.
+- **Preview by default** — give unpromoted changes isolated review URLs.
+- **Managed capacity** — keep customer workflows independent from servers,
+  clusters, and infrastructure providers.
+- **Separate planes** — scale disposable build work independently from
+  availability-sensitive runtimes.
 
-- **Applications**: Deploy any type of application (Node.js, PHP, Python, Go, Ruby, etc.).
-- **Databases**: Create and manage databases with support for MySQL, PostgreSQL, MongoDB, MariaDB, libsql, and Redis.
-- **Backups**: Automate backups for databases to an external storage destination.
-- **Docker Compose**: Native support for Docker Compose to manage complex applications.
-- **Multi Node**: Scale applications to multiple nodes using Docker Swarm to manage the cluster.
-- **Templates**: Deploy open-source templates (Plausible, Pocketbase, Calcom, etc.) with a single click.
-- **Traefik Integration**: Automatically integrates with Traefik for routing and load balancing.
-- **Real-time Monitoring**: Monitor CPU, memory, storage, and network usage for every resource.
-- **Docker Management**: Easily deploy and manage Docker containers.
-- **CLI/API**: Manage your applications and databases using the command line or through the API.
-- **Notifications**: Get notified when your deployments succeed or fail (via Slack, Discord, Telegram, Email, etc.).
-- **Multi Server**: Deploy and manage your applications remotely to external servers.
-- **Self-Hosted**: Self-host Dokploy on your VPS.
+The domain language is defined in [CONTEXT.md](CONTEXT.md), and durable
+architectural decisions are recorded in [docs/adr](docs/adr).
 
-## 🚀 Getting Started
+## Development
 
-To get started, run the following command on a VPS:
+Requirements:
 
-Want to skip the installation process? [Try the Dokploy Cloud](https://app.dokploy.com).
+- Node.js 24.4 or newer in the Node 24 line
+- pnpm 10.22 or newer
+- PostgreSQL, Redis, and Docker for integration workflows
+
+Install and validate the workspace:
 
 ```bash
-curl -sSL https://dokploy.com/install.sh | bash
+pnpm install --frozen-lockfile
+pnpm check:license-boundaries
+pnpm typecheck
+pnpm test
 ```
 
-For detailed documentation, visit [docs.dokploy.com](https://docs.dokploy.com).
+The current source directory name `apps/dokploy`, internal `@dokploy/server`
+package alias, database identifiers, and selected runtime paths are temporary
+compatibility boundaries inherited from the Apache-licensed foundation. They
+are not the product name and must not be used in customer-facing copy.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the local workflow.
 
-[Github Sponsors](https://github.com/sponsors/Siumauricio)
+## Licensing and attribution
 
-### Contributors 🤝
-
-<a href="https://github.com/dokploy/dokploy/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=dokploy/dokploy" alt="Contributors" />
-</a>
-
-## 📺 Video Tutorial
-
-<a href="https://youtu.be/mznYKPvhcfw">
-  <img src="https://dokploy.com/banner.png" alt="Watch the video" width="400"/>
-</a>
-
-## 🤝 Contributing
-
-Check out the [Contributing Guide](CONTRIBUTING.md) for more information.
+DeployTide is licensed under the Apache License, Version 2.0. The codebase is
+derived from the Apache-licensed portions of
+[Dokploy](https://github.com/Dokploy/dokploy). All source that upstream placed
+under `proprietary` directories has been removed; no DSAL implementation is
+included. See [LICENSE.MD](LICENSE.MD) and [NOTICE](NOTICE).

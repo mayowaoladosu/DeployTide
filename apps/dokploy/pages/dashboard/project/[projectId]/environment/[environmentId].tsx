@@ -1,4 +1,5 @@
 import type { findEnvironmentById } from "@dokploy/server";
+import { BRAND } from "@dokploy/server/brand";
 import { validateRequest } from "@dokploy/server/lib/auth";
 import { createServerSideHelpers } from "@trpc/react-query/server";
 import {
@@ -109,7 +110,6 @@ import {
 import { cn } from "@/lib/utils";
 import { appRouter } from "@/server/api/root";
 import { api } from "@/utils/api";
-import { useWhitelabeling } from "@/utils/hooks/use-whitelabeling";
 
 export type Services = {
 	serverId?: string | null;
@@ -400,8 +400,7 @@ const EnvironmentPage = (
 			{ projectId: selectedTargetProject },
 			{ enabled: !!selectedTargetProject },
 		);
-	const { config: whitelabeling } = useWhitelabeling();
-	const appName = whitelabeling?.appName || "Dokploy";
+	const appName = BRAND.name;
 
 	const emptyServices =
 		!currentEnvironment ||

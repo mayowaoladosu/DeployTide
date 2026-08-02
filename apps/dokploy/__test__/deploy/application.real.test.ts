@@ -17,6 +17,7 @@ vi.mock("@dokploy/server/db", () => {
 			returning: vi.fn().mockResolvedValue([{}]),
 			from: vi.fn(() => chain),
 			innerJoin: vi.fn(() => chain),
+			// biome-ignore lint/suspicious/noThenProperty: emulate a Promise-like Drizzle query chain
 			then: (resolve: (v: any) => void) => {
 				resolve([]);
 			},
@@ -171,7 +172,7 @@ async function cleanupFiles(appName: string) {
 	}
 }
 
-describe(
+describe.skipIf(process.platform === "win32")(
 	"deployApplication - REAL Execution Tests",
 	() => {
 		let currentAppName: string;

@@ -12,6 +12,7 @@ import {
 	Tailwind,
 	Text,
 } from "@react-email/components";
+import { BRAND } from "../../brand";
 import { emailTailwindConfig } from "../tailwind-config";
 
 export type TemplateProps = {
@@ -24,10 +25,10 @@ export type TemplateProps = {
 };
 
 export const BuildSuccessEmail = ({
-	projectName = "dokploy",
+	projectName = "example-project",
 	applicationName = "frontend",
 	applicationType = "application",
-	buildLink = "https://dokploy.com/projects/dokploy-test/applications/dokploy-test",
+	buildLink = "https://app.deploytide.com/example-project/deployments/example",
 	date = "2023-05-01T00:00:00.000Z",
 	environmentName = "production",
 }: TemplateProps) => {
@@ -41,12 +42,10 @@ export const BuildSuccessEmail = ({
 					<Container className="border border-solid border-[#eaeaea] rounded-lg my-[40px] mx-auto p-[20px] max-w-[465px]">
 						<Section className="mt-[32px]">
 							<Img
-								src={
-									"https://raw.githubusercontent.com/Dokploy/dokploy/refs/heads/canary/apps/dokploy/logo.png"
-								}
+								src={BRAND.emailLogoUrl}
 								width="100"
 								height="50"
-								alt="Dokploy"
+								alt={BRAND.name}
 								className="my-0 mx-auto"
 							/>
 						</Section>

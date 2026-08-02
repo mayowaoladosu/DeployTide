@@ -1,10 +1,10 @@
 import { buffer } from "node:stream/consumers";
-import { findUserById, type Server } from "@dokploy/server";
+import { findUserById } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
-import { and, asc, eq } from "drizzle-orm";
+import { and, eq } from "drizzle-orm";
 import type { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
-import { organization, server, user } from "@/server/db/schema";
+import { user } from "@/server/db/schema";
 import {
 	sendInvoiceEmail,
 	sendPaymentFailedEmail,
@@ -106,8 +106,6 @@ export default async function handler(
 			if (admin.isEnterpriseCloud) {
 				break;
 			}
-			const newServersQuantity = admin.serversQuantity;
-			await updateServersBasedOnQuantity(admin.id, newServersQuantity);
 			break;
 		}
 		case "customer.subscription.created": {
@@ -158,7 +156,6 @@ export default async function handler(
 				break;
 			}
 
-			await disableServers(admin.id);
 			break;
 		}
 		case "customer.subscription.updated": {
@@ -190,9 +187,7 @@ export default async function handler(
 						),
 					);
 
-				await updateServersBasedOnQuantity(admin.id, serversQuantity);
 			} else {
-				await disableServers(admin.id);
 				await db
 					.update(user)
 					.set({ serversQuantity: 0 })
@@ -243,9 +238,6 @@ export default async function handler(
 			if (admin.isEnterpriseCloud) {
 				break;
 			}
-			const newServersQuantity = admin.serversQuantity;
-			await updateServersBasedOnQuantity(admin.id, newServersQuantity);
-
 			if (admin.sendInvoiceNotifications) {
 				await sendInvoiceEmail(newInvoice, admin);
 			}
@@ -287,7 +279,6 @@ export default async function handler(
 						),
 					);
 
-				await disableServers(admin.id);
 			}
 
 			break;
@@ -305,7 +296,6 @@ export default async function handler(
 				break;
 			}
 
-			await disableServers(admin.id);
 			await db
 				.update(user)
 				.set({
@@ -329,75 +319,11 @@ export default async function handler(
 	return res.status(200).json({ received: true });
 }
 
-const disableServers = async (userId: string) => {
-	const organizations = await db.query.organization.findMany({
-		where: eq(organization.ownerId, userId),
-	});
-
-	for (const org of organizations) {
-		await db
-			.update(server)
-			.set({
-				serverStatus: "inactive",
-			})
-			.where(eq(server.organizationId, org.id));
-	}
-};
-
 const findUserByStripeCustomerId = async (stripeCustomerId: string) => {
 	const userResult = await db.query.user.findFirst({
 		where: eq(user.stripeCustomerId, stripeCustomerId),
 	});
 	return userResult;
 };
+// Billing events intentionally never mutate runtime capacity or production traffic.
 
-const activateServer = async (serverId: string) => {
-	await db
-		.update(server)
-		.set({ serverStatus: "active" })
-		.where(eq(server.serverId, serverId));
-};
-
-const deactivateServer = async (serverId: string) => {
-	await db
-		.update(server)
-		.set({ serverStatus: "inactive" })
-		.where(eq(server.serverId, serverId));
-};
-
-export const findServersByUserIdSorted = async (userId: string) => {
-	const organizations = await db.query.organization.findMany({
-		where: eq(organization.ownerId, userId),
-	});
-
-	const servers: Server[] = [];
-	for (const org of organizations) {
-		const serversByOrg = await db.query.server.findMany({
-			where: eq(server.organizationId, org.id),
-			orderBy: asc(server.createdAt),
-		});
-		servers.push(...serversByOrg);
-	}
-
-	return servers;
-};
-export const updateServersBasedOnQuantity = async (
-	userId: string,
-	newServersQuantity: number,
-) => {
-	const servers = await findServersByUserIdSorted(userId);
-
-	if (servers.length > newServersQuantity) {
-		for (const [index, server] of servers.entries()) {
-			if (index < newServersQuantity) {
-				await activateServer(server.serverId);
-			} else {
-				await deactivateServer(server.serverId);
-			}
-		}
-	} else {
-		for (const server of servers) {
-			await activateServer(server.serverId);
-		}
-	}
-};

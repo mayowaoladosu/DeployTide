@@ -1,12 +1,10 @@
 import { db } from "@dokploy/server/db";
-import { member, organizationRole } from "@dokploy/server/db/schema";
-import { hasValidLicense } from "@dokploy/server/services/proprietary/license-key";
+import { member } from "@dokploy/server/db/schema";
 import { TRPCError } from "@trpc/server";
 import { and, eq } from "drizzle-orm";
 import {
-	ac,
+	type ac,
 	adminRole,
-	enterpriseOnlyResources,
 	memberRole,
 	ownerRole,
 	statements,
@@ -38,39 +36,8 @@ const staticRoles: Record<string, ReturnType<typeof ac.newRole>> = {
 
 const resolveRole = async (
 	roleName: string,
-	organizationId: string,
 ): Promise<ReturnType<typeof ac.newRole> | null> => {
-	if (staticRoles[roleName]) {
-		return staticRoles[roleName];
-	}
-
-	const licensed = await hasValidLicense(organizationId);
-	if (!licensed) {
-		return null;
-	}
-
-	const customRoles = await db.query.organizationRole.findMany({
-		where: and(
-			eq(organizationRole.organizationId, organizationId),
-			eq(organizationRole.role, roleName),
-		),
-	});
-
-	if (customRoles.length === 0) {
-		return null;
-	}
-
-	const merged: Record<string, string[]> = {};
-	for (const entry of customRoles) {
-		const parsed = JSON.parse(entry.permission) as Record<string, string[]>;
-		for (const [resource, actions] of Object.entries(parsed)) {
-			merged[resource] = [
-				...new Set([...(merged[resource] ?? []), ...actions]),
-			];
-		}
-	}
-
-	return ac.newRole(merged as any);
+	return staticRoles[roleName] ?? null;
 };
 
 export const checkPermission = async (
@@ -81,16 +48,7 @@ export const checkPermission = async (
 	const { activeOrganizationId: organizationId } = ctx.session;
 	const memberRecord = await findMemberByUserId(userId, organizationId);
 
-	const isPrivilegedStaticRole =
-		memberRecord.role === "owner" || memberRecord.role === "admin";
-	if (isPrivilegedStaticRole) {
-		const allEnterprise = Object.keys(permissions).every((r) =>
-			enterpriseOnlyResources.has(r),
-		);
-		if (allEnterprise) return;
-	}
-
-	const role = await resolveRole(memberRecord.role, organizationId);
+	const role = await resolveRole(memberRecord.role);
 
 	if (!role) {
 		throw new TRPCError({
@@ -182,22 +140,16 @@ export const resolvePermissions = async (
 	const userId = ctx.user.id;
 	const organizationId = ctx.session.activeOrganizationId;
 	const memberRecord = await findMemberByUserId(userId, organizationId);
-	const role = await resolveRole(memberRecord.role, organizationId);
+	const role = await resolveRole(memberRecord.role);
 
 	const legacyOverrides =
 		memberRecord.role === "member" ? getLegacyOverrides(memberRecord) : {};
 
-	const isPrivilegedRole =
-		memberRecord.role === "owner" || memberRecord.role === "admin";
 	const result = {} as ResolvedPermissions;
 
 	for (const [resource, actions] of Object.entries(statements)) {
 		const resourcePerms = {} as Record<string, boolean>;
 		for (const action of actions) {
-			if (isPrivilegedRole && enterpriseOnlyResources.has(resource)) {
-				resourcePerms[action] = true;
-				continue;
-			}
 			if (!role) {
 				resourcePerms[action] = false;
 				continue;

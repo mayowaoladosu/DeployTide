@@ -1,4 +1,5 @@
 import { validateRequest } from "@dokploy/server/lib/auth";
+import { BRAND } from "@dokploy/server/brand";
 import { createServerSideHelpers } from "@trpc/react-query/server";
 import copy from "copy-to-clipboard";
 import { HelpCircle, ServerOff } from "lucide-react";
@@ -74,7 +75,7 @@ const Libsql = (
 				<Head>
 					<title>
 						Database: {data?.name} - {data?.environment?.project?.name} |
-						Dokploy
+						{BRAND.name}
 					</title>
 				</Head>
 				<Card className="h-full bg-sidebar  p-2.5 rounded-xl w-full">

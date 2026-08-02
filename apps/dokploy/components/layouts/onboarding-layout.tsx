@@ -1,7 +1,6 @@
 import Link from "next/link";
 import type React from "react";
-import { cn } from "@/lib/utils";
-import { useWhitelabelingPublic } from "@/utils/hooks/use-whitelabeling";
+import { BRAND } from "@dokploy/server/brand";
 import { GithubIcon } from "../icons/data-tools-icons";
 import { Logo } from "../shared/logo";
 import { Button } from "../ui/button";
@@ -10,14 +9,6 @@ interface Props {
 	children: React.ReactNode;
 }
 export const OnboardingLayout = ({ children }: Props) => {
-	const { config: whitelabeling } = useWhitelabelingPublic();
-	const appName = whitelabeling?.appName || "Dokploy";
-	const appDescription =
-		whitelabeling?.appDescription ||
-		"\u201CThe Open Source alternative to Netlify, Vercel, Heroku.\u201D";
-	const logoUrl =
-		whitelabeling?.loginLogoUrl || whitelabeling?.logoUrl || undefined;
-
 	return (
 		<div className="container relative min-h-svh flex-col items-center justify-center flex lg:max-w-none lg:grid lg:grid-cols-2 lg:px-0 w-full">
 			<div className="relative hidden h-full flex-col  p-10 text-primary dark:border-r lg:flex">
@@ -26,12 +17,15 @@ export const OnboardingLayout = ({ children }: Props) => {
 					href="/"
 					className="relative z-20 flex items-center text-lg font-medium gap-4  text-primary"
 				>
-					<Logo className="size-10" logoUrl={logoUrl} />
-					{appName}
+					<Logo className="size-10" />
+					{BRAND.name}
 				</Link>
 				<div className="relative z-20 mt-auto">
 					<blockquote className="space-y-2">
-						<p className="text-lg text-primary">{appDescription}</p>
+						<p className="text-lg text-primary">{BRAND.description}</p>
+						<p className="text-sm text-muted-foreground">
+							{BRAND.relationship}
+						</p>
 					</blockquote>
 				</div>
 			</div>
@@ -41,12 +35,12 @@ export const OnboardingLayout = ({ children }: Props) => {
 				</div>
 				<div className="mx-auto flex w-full max-w-lg items-center justify-center gap-1 pb-6 text-muted-foreground sm:justify-end">
 					<Button variant="ghost" size="icon">
-						<Link href="https://github.com/dokploy/dokploy">
+						<Link href={BRAND.repositoryUrl}>
 							<GithubIcon />
 						</Link>
 					</Button>
 					<Button variant="ghost" size="icon">
-						<Link href="https://x.com/getdokploy">
+						<Link href={BRAND.issuesUrl}>
 							<svg
 								stroke="currentColor"
 								fill="currentColor"
@@ -60,13 +54,13 @@ export const OnboardingLayout = ({ children }: Props) => {
 						</Link>
 					</Button>
 					<Button variant="ghost" size="icon">
-						<Link href="https://discord.com/invite/2tBnJ3jDJc">
+						<Link href={BRAND.discussionsUrl}>
 							<svg
 								xmlns="http://www.w3.org/2000/svg"
 								viewBox="0 0 48 48"
 								width="48px"
 								height="48px"
-								className={cn("size-6")}
+								className="size-6"
 							>
 								<path
 									fill="currentColor"

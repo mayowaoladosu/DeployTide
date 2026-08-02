@@ -15,6 +15,7 @@ import {
 	Tailwind,
 	Text,
 } from "@react-email/components";
+import { BRAND } from "../../brand";
 import { emailTailwindConfig } from "../tailwind-config";
 
 export type TemplateProps = {
@@ -34,7 +35,7 @@ export const PaymentFailedEmail = ({
 	date = "2024-01-01",
 	hostedInvoiceUrl = "https://invoice.stripe.com/example",
 }: TemplateProps) => {
-	const previewText = `Action required: Your Dokploy payment for ${amountDue} failed`;
+	const previewText = `Action required: Your ${BRAND.name} payment for ${amountDue} failed`;
 	return (
 		<Html>
 			<Head />
@@ -45,10 +46,10 @@ export const PaymentFailedEmail = ({
 						{/* Header */}
 						<Section className="bg-[#09090b] rounded-t-xl px-[40px] py-[32px] text-center">
 							<Img
-								src="https://raw.githubusercontent.com/Dokploy/website/refs/heads/main/apps/docs/public/logo-dokploy-blackpng.png"
+								src={BRAND.emailLogoUrl}
 								width="190"
 								height="120"
-								alt="Dokploy"
+								alt={BRAND.name}
 								className="my-0 mx-auto"
 							/>
 						</Section>
@@ -118,9 +119,9 @@ export const PaymentFailedEmail = ({
 							{/* Warning */}
 							<Section className="bg-[#fefce8] border border-solid border-[#fef08a] rounded-lg px-[20px] py-[16px] mb-[24px]">
 								<Text className="text-[#854d0e] text-[13px] leading-[20px] m-0">
-									If the payment issue is not resolved, your servers will be
-									deactivated. Please update your payment method as soon as
-									possible.
+									If the payment issue is not resolved during the grace period,
+									new billable work may be paused. Existing production traffic
+									will remain available while you recover billing.
 								</Text>
 							</Section>
 
@@ -140,15 +141,15 @@ export const PaymentFailedEmail = ({
 							<Text className="text-[#a1a1aa] text-[12px] leading-[18px] m-0">
 								This is an automated email from{" "}
 								<Link
-									href="https://dokploy.com"
+									href={BRAND.repositoryUrl}
 									className="text-[#71717a] underline"
 								>
-									Dokploy Cloud
+									{BRAND.name}
 								</Link>
 								. If you have any questions about your billing, please contact
 								our{" "}
 								<Link
-									href="https://discord.gg/2tBnJ3jDJc"
+									href={BRAND.issuesUrl}
 									className="text-[#71717a] underline"
 								>
 									support team

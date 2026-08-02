@@ -1,4 +1,5 @@
 import { validateRequest } from "@dokploy/server/lib/auth";
+import { BRAND } from "@dokploy/server/brand";
 import { createServerSideHelpers } from "@trpc/react-query/server";
 import copy from "copy-to-clipboard";
 import { HelpCircle, ServerOff } from "lucide-react";
@@ -58,7 +59,6 @@ import {
 import { UseKeyboardNav } from "@/hooks/use-keyboard-nav";
 import { appRouter } from "@/server/api/root";
 import { api } from "@/utils/api";
-import { useWhitelabeling } from "@/utils/hooks/use-whitelabeling";
 
 type TabState =
 	| "projects"
@@ -101,8 +101,7 @@ const Service = (
 	const { data: environments } = api.environment.byProjectId.useQuery({
 		projectId: data?.environment?.project?.projectId || "",
 	});
-	const { config: whitelabeling } = useWhitelabeling();
-	const appName = whitelabeling?.appName || "Dokploy";
+	const appName = BRAND.name;
 	const environmentDropdownItems =
 		environments?.map((env) => ({
 			name: env.name,

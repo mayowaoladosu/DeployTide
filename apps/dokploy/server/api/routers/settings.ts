@@ -47,6 +47,7 @@ import {
 	writeTraefikSetup,
 } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
+import { BRAND } from "@dokploy/server/brand";
 import { checkPermission } from "@dokploy/server/services/permission";
 import { generateOpenApiDocument } from "@dokploy/trpc-openapi";
 import { TRPCError } from "@trpc/server";
@@ -76,7 +77,6 @@ import { appRouter } from "../root";
 import {
 	adminProcedure,
 	createTRPCRouter,
-	enterpriseProcedure,
 	protectedProcedure,
 	publicProcedure,
 } from "../trpc";
@@ -410,7 +410,7 @@ export const settingsRouter = createTRPCRouter({
 			return true;
 		}),
 
-	updateRemoteServersOnly: enterpriseProcedure
+	updateRemoteServersOnly: adminProcedure
 		.input(z.object({ remoteServersOnly: z.boolean() }))
 		.mutation(async ({ input, ctx }) => {
 			if (IS_CLOUD) {
@@ -450,28 +450,6 @@ export const settingsRouter = createTRPCRouter({
 				action: "update",
 				resourceType: "settings",
 				resourceName: "builds-concurrency",
-			});
-			return true;
-		}),
-
-	updateEnforceSSO: enterpriseProcedure
-		.input(z.object({ enforceSSO: z.boolean() }))
-		.mutation(async ({ input, ctx }) => {
-			if (IS_CLOUD) {
-				throw new TRPCError({
-					code: "BAD_REQUEST",
-					message: "This feature is only available for self-hosted instances",
-				});
-			}
-
-			await updateWebServerSettings({
-				enforceSSO: input.enforceSSO,
-			});
-
-			await audit(ctx, {
-				action: "update",
-				resourceType: "settings",
-				resourceName: "enforce-sso",
 			});
 			return true;
 		}),
@@ -659,7 +637,7 @@ export const settingsRouter = createTRPCRouter({
 			const protocol = ctx.req.headers["x-forwarded-proto"];
 			const url = `${protocol}://${ctx.req.headers.host}/api`;
 			const openApiDocument = generateOpenApiDocument(appRouter, {
-				title: "tRPC OpenAPI",
+				title: `${BRAND.name} API`,
 				version: packageInfo.version,
 				baseUrl: url,
 				docsUrl: `${url}/settings.getOpenApiDocument`,
@@ -700,19 +678,14 @@ export const settingsRouter = createTRPCRouter({
 					"server",
 					"volumeBackups",
 					"environment",
-					"auditLog",
-					"customRole",
-					"whitelabeling",
-					"sso",
-					"licenseKey",
 					"organization",
 					"previewDeployment",
 				],
 			});
 
 			openApiDocument.info = {
-				title: "Dokploy API",
-				description: "Endpoints for dokploy",
+				title: `${BRAND.name} API`,
+				description: BRAND.description,
 				version: packageInfo.version,
 			};
 

@@ -1,8 +1,8 @@
 # Contributing
 
-Hey, thanks for your interest in contributing to Dokploy! We appreciate your help and taking your time to contribute.
+Thanks for contributing to DeployTide. Changes should preserve the managed-platform customer model described in CONTEXT.md and the accepted ADRs.
 
-Before you start, please first discuss the feature/bug you want to add with the owners and community via github issues.
+Before starting a large feature, discuss it in this repository's GitHub issues.
 
 We have a few guidelines to follow when contributing to this project:
 
@@ -51,13 +51,13 @@ feat: add new feature
 
 ## Setup
 
-Before you start, please make the clone based on the `canary` branch, since the `main` branch is the source of truth and should always reflect the latest stable release, also the PRs will be merged to the `canary` branch.
+Create a focused feature branch from `deploytide`, which is the source of truth for this repository.
 
 We use Node v24.4.0 and recommend this specific version. If you have nvm installed, you can run `nvm install 24.4.0 && nvm use` in the root directory.
 
 ```bash
-git clone https://github.com/dokploy/dokploy.git
-cd dokploy
+git clone https://github.com/mayowaoladosu/DeployTide.git
+cd DeployTide
 pnpm install
 cp apps/dokploy/.env.example apps/dokploy/.env
 ```
@@ -71,7 +71,7 @@ cp apps/dokploy/.env.example apps/dokploy/.env
 Run the command that will spin up all the required services and files.
 
 ```bash
-pnpm run dokploy:setup
+pnpm run deploytide:setup
 ```
 
 Run this script
@@ -83,7 +83,7 @@ pnpm run server:script
 Now run the development server.
 
 ```bash
-pnpm run dokploy:dev
+pnpm run deploytide:dev
 ```
 
 Go to http://localhost:3000 to see the development server
@@ -94,7 +94,7 @@ Go to http://localhost:3000 to see the development server
 ## Build
 
 ```bash
-pnpm run dokploy:build
+pnpm run deploytide:build
 ```
 
 ## Docker
@@ -135,7 +135,7 @@ pnpm dlx localtunnel --port 3000
 If you run into permission issues of docker run the following command
 
 ```bash
-sudo chown -R USERNAME dokploy or sudo chown -R $(whoami) ~/.docker
+sudo chown -R $(whoami) ~/.docker
 ```
 
 ## Application deploy
@@ -161,10 +161,10 @@ curl -sSL "https://github.com/buildpacks/pack/releases/download/v0.39.1/pack-v0.
 
 ## Pull Request
 
-- The `canary` branch is the source of truth and should always reflect the latest stable release.
+- The `deploytide` branch is the source of truth.
 - Create a new branch for each feature or bug fix.
 - Make sure to add tests for your changes.
-- Make sure to update the documentation for any changes Go to the [docs.dokploy.com](https://docs.dokploy.com) website to see the changes.
+- Update repository documentation when behavior or domain language changes.
 - When creating a pull request, please provide a clear and concise description of the changes made.
 - If you include a video or screenshot, would be awesome so we can see the changes in action.
 - If your pull request fixes an open issue, please reference the issue in the pull request description.
@@ -176,13 +176,13 @@ curl -sSL "https://github.com/buildpacks/pack/releases/download/v0.39.1/pack-v0.
 - **Focus and Scope:** Each Pull Request should ideally address a single, well-defined problem or introduce one new feature. This greatly facilitates review and reduces the chances of introducing unintended side effects.
 - **Avoid Unfocused Changes:** Please avoid submitting Pull Requests that contain only minor changes such as whitespace adjustments, IDE-generated formatting, or removal of unused variables, unless these are part of a larger, clearly defined refactor or a dedicated "cleanup" Pull Request that addresses a specific `good first issue` or maintenance task.
 - **Issue Association:** For any significant change, it's highly recommended to open an issue first to discuss the proposed solution with the community and maintainers. This ensures alignment and avoids duplicated effort. If your PR resolves an existing issue, please link it in the description (e.g., `Fixes #123`, `Closes #456`).
-- **Large Features:** Pull Requests that introduce very large or broad features **will not be accepted** unless the idea is first outlined and discussed in a GitHub issue. Large features should be designed together with the Dokploy team so the project stays coherent and moves in the same direction. Open an issue to propose and align on the design before implementing.
+- **Large Features:** Pull Requests that introduce broad features should first be outlined in a GitHub issue so the design remains coherent with DeployTide's product boundary.
 
 Thank you for your contribution!
 
 ## Templates
 
-To add a new template, go to `https://github.com/Dokploy/templates` repository and read the README.md file.
+Template-catalog changes should be proposed in a DeployTide issue until a dedicated catalog repository is established.
 
 ### Recommendations
 
@@ -193,4 +193,4 @@ To add a new template, go to `https://github.com/Dokploy/templates` repository a
 
 ## Docs & Website
 
-To contribute to the Dokploy docs or website, please go to this [repository](https://github.com/Dokploy/website).
+Documentation for this phase lives in this repository.

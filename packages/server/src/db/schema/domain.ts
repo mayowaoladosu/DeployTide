@@ -95,7 +95,6 @@ export const apiCreateDomain = createSchema.pick({
 	internalPath: true,
 	stripPath: true,
 	middlewares: true,
-	forwardAuthEnabled: true,
 });
 
 export const apiFindDomain = z.object({
@@ -128,6 +127,5 @@ export const apiUpdateDomain = createSchema
 		internalPath: true,
 		stripPath: true,
 		middlewares: true,
-		forwardAuthEnabled: true,
 	})
 	.merge(createSchema.pick({ domainId: true }).required());

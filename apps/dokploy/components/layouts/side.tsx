@@ -11,7 +11,6 @@ import {
 	ChevronRight,
 	ChevronsUpDown,
 	CircleHelp,
-	ClipboardList,
 	Clock,
 	CreditCard,
 	Database,
@@ -20,14 +19,11 @@ import {
 	GalleryVerticalEnd,
 	GitBranch,
 	House,
-	Key,
 	KeyRound,
 	Loader2,
-	LogIn,
 	type LucideIcon,
 	Network,
 	Package,
-	Palette,
 	PieChart,
 	Rocket,
 	Server,
@@ -42,7 +38,6 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { toast } from "sonner";
-import { Badge } from "@/components/ui/badge";
 import {
 	Breadcrumb,
 	BreadcrumbItem,
@@ -85,6 +80,7 @@ import {
 } from "@/components/ui/sidebar";
 import { authClient } from "@/lib/auth-client";
 import { cn } from "@/lib/utils";
+import { BRAND } from "@dokploy/server/brand";
 import type { AppRouter } from "@/server/api/root";
 import { api } from "@/utils/api";
 import { AddOrganization } from "../dashboard/organization/handle-organization";
@@ -332,13 +328,6 @@ const MENU: Menu = {
 		},
 		{
 			isSingle: true,
-			title: "Audit Logs",
-			icon: ClipboardList,
-			url: "/dashboard/settings/audit-logs",
-			isEnabled: ({ permissions }) => !!permissions?.auditLog.read,
-		},
-		{
-			isSingle: true,
 			title: "SSH Keys",
 			icon: KeyRound,
 			url: "/dashboard/settings/ssh-keys",
@@ -413,41 +402,17 @@ const MENU: Menu = {
 			// Only enabled for owners in cloud environments
 			isEnabled: ({ auth, isCloud }) => !!(auth?.role === "owner" && isCloud),
 		},
-		{
-			isSingle: true,
-			title: "License",
-			url: "/dashboard/settings/license",
-			icon: Key,
-			// Only enabled for owners
-			isEnabled: ({ auth }) => !!(auth?.role === "owner"),
-		},
-		{
-			isSingle: true,
-			title: "SSO",
-			url: "/dashboard/settings/sso",
-			icon: LogIn,
-			// Enabled for admins in both cloud and self-hosted (enterprise)
-			isEnabled: ({ permissions }) => !!permissions?.organization.update,
-		},
-		{
-			isSingle: true,
-			title: "Whitelabeling",
-			url: "/dashboard/settings/whitelabeling",
-			icon: Palette,
-			// Only enabled for owners in non-cloud environments (enterprise)
-			isEnabled: ({ auth, isCloud }) => !!(auth?.role === "owner" && !isCloud),
-		},
 	],
 
 	help: [
 		{
 			name: "Documentation",
-			url: "https://docs.dokploy.com/docs/core",
+			url: BRAND.repositoryUrl,
 			icon: BookIcon,
 		},
 		{
 			name: "Support",
-			url: "https://discord.gg/2tBnJ3jDJc",
+			url: BRAND.issuesUrl,
 			icon: CircleHelp,
 		},
 	],
@@ -461,10 +426,6 @@ function createMenuForAuthUser(opts: {
 	auth?: AuthQueryOutput;
 	permissions?: PermissionsOutput;
 	isCloud: boolean;
-	whitelabeling?: {
-		docsUrl?: string | null;
-		supportUrl?: string | null;
-	} | null;
 }): Menu {
 	const filterEnabled = <
 		T extends {
@@ -483,21 +444,10 @@ function createMenuForAuthUser(opts: {
 					}),
 		) as T[];
 
-	// Apply whitelabeling URL overrides to help items
-	const helpItems = filterEnabled(MENU.help).map((item) => {
-		if (opts.whitelabeling?.docsUrl && item.name === "Documentation") {
-			return { ...item, url: opts.whitelabeling.docsUrl };
-		}
-		if (opts.whitelabeling?.supportUrl && item.name === "Support") {
-			return { ...item, url: opts.whitelabeling.supportUrl };
-		}
-		return item;
-	});
-
 	return {
 		home: filterEnabled(MENU.home),
 		settings: filterEnabled(MENU.settings),
-		help: helpItems,
+		help: filterEnabled(MENU.help),
 	};
 }
 
@@ -580,8 +530,6 @@ function SidebarLogo() {
 	const { isMobile } = useSidebar();
 	const isCollapsed = state === "collapsed" && !isMobile;
 	const { data: activeOrganization } = api.organization.active.useQuery();
-	const { data: haveValidLicense } =
-		api.licenseKey.haveValidLicenseKey.useQuery();
 
 	const { data: invitations, refetch: refetchInvitations } =
 		api.user.getInvitations.useQuery();
@@ -651,9 +599,6 @@ function SidebarLogo() {
 												<p className="text-sm font-medium leading-none">
 													{activeOrganization?.name ?? "Select Organization"}
 												</p>
-												{haveValidLicense && (
-													<Badge variant="blue">Enterprise</Badge>
-												)}
 											</div>
 										</div>
 									</div>
@@ -921,11 +866,7 @@ export default function Page({ children }: Props) {
 	const pathname = usePathname();
 	const { data: auth } = api.user.get.useQuery();
 	const { data: permissions } = api.user.getPermissions.useQuery();
-	const { data: dokployVersion } = api.settings.getDokployVersion.useQuery();
-	const { data: whitelabeling } = api.whitelabeling.get.useQuery(undefined, {
-		staleTime: 5 * 60 * 1000,
-		refetchOnWindowFocus: false,
-	});
+	const { data: deployTideVersion } = api.settings.getDokployVersion.useQuery();
 
 	const includesProjects = pathname?.includes("/dashboard/project");
 	const { data: isCloud } = api.settings.isCloud.useQuery();
@@ -938,7 +879,6 @@ export default function Page({ children }: Props) {
 		auth,
 		permissions,
 		isCloud: !!isCloud,
-		whitelabeling,
 	});
 
 	const activeItem = findActiveNavItem(
@@ -1189,14 +1129,9 @@ export default function Page({ children }: Props) {
 						<SidebarMenuItem>
 							<UserNav />
 						</SidebarMenuItem>
-						{whitelabeling?.footerText && (
+						{deployTideVersion && (
 							<div className="px-3 text-xs text-muted-foreground text-center group-data-[collapsible=icon]:hidden">
-								{whitelabeling.footerText}
-							</div>
-						)}
-						{dokployVersion && (
-							<div className="px-3 text-xs text-muted-foreground text-center group-data-[collapsible=icon]:hidden">
-								Version {dokployVersion}
+								Version {deployTideVersion}
 							</div>
 						)}
 					</SidebarMenu>

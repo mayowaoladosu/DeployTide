@@ -35,24 +35,14 @@ vi.mock("@dokploy/server/db", () => ({
 				findFirst: vi.fn(() => Promise.resolve(memberToReturn)),
 				findMany: vi.fn(() => Promise.resolve([])),
 			},
-			organizationRole: {
-				findFirst: vi.fn(),
-				findMany: vi.fn(() => Promise.resolve([])),
-			},
 		},
 	},
-}));
-
-vi.mock("@dokploy/server/services/proprietary/license-key", () => ({
-	hasValidLicense: vi.fn(() => Promise.resolve(false)),
 }));
 
 const { resolvePermissions } = await import(
 	"@dokploy/server/services/permission"
 );
-const { enterpriseOnlyResources, statements } = await import(
-	"@dokploy/server/lib/access-control"
-);
+const { statements } = await import("@dokploy/server/lib/access-control");
 
 const ctx = {
 	user: { id: "user-1" },
@@ -63,32 +53,31 @@ beforeEach(() => {
 	vi.clearAllMocks();
 });
 
-describe("enterprise resources for static roles", () => {
-	it("owner gets true for all enterprise resources", async () => {
+describe("core resources for static roles", () => {
+	it("owner gets every declared permission", async () => {
 		memberToReturn = mockMemberData("owner");
 		const perms = await resolvePermissions(ctx);
 
-		for (const resource of enterpriseOnlyResources) {
-			const actions = statements[resource as keyof typeof statements];
+		for (const [resource, actions] of Object.entries(statements)) {
 			for (const action of actions) {
 				expect((perms as any)[resource][action]).toBe(true);
 			}
 		}
 	});
 
-	it("admin gets true for all enterprise resources", async () => {
+	it("admin gets every permission except workspace deletion", async () => {
 		memberToReturn = mockMemberData("admin");
 		const perms = await resolvePermissions(ctx);
 
-		for (const resource of enterpriseOnlyResources) {
-			const actions = statements[resource as keyof typeof statements];
+		for (const [resource, actions] of Object.entries(statements)) {
 			for (const action of actions) {
-				expect((perms as any)[resource][action]).toBe(true);
+				const expected = !(resource === "organization" && action === "delete");
+				expect((perms as any)[resource][action]).toBe(expected);
 			}
 		}
 	});
 
-	it("member gets true for service-level enterprise resources", async () => {
+	it("member gets service-scoped permissions", async () => {
 		memberToReturn = mockMemberData("member");
 		const perms = await resolvePermissions(ctx);
 
@@ -100,7 +89,7 @@ describe("enterprise resources for static roles", () => {
 		expect(perms.monitoring.read).toBe(true);
 	});
 
-	it("member gets false for org-level enterprise resources", async () => {
+	it("member gets false for workspace administration resources", async () => {
 		memberToReturn = mockMemberData("member");
 		const perms = await resolvePermissions(ctx);
 
@@ -109,7 +98,6 @@ describe("enterprise resources for static roles", () => {
 		expect(perms.certificate.read).toBe(false);
 		expect(perms.destination.read).toBe(false);
 		expect(perms.notification.read).toBe(false);
-		expect(perms.auditLog.read).toBe(false);
 	});
 });
 

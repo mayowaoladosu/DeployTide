@@ -1,5 +1,6 @@
 import InvoiceNotificationEmail from "@dokploy/server/emails/emails/invoice-notification";
 import PaymentFailedEmail from "@dokploy/server/emails/emails/payment-failed";
+import { BRAND } from "@dokploy/server/brand";
 import { sendEmail } from "@dokploy/server/verification/send-verification-email";
 import { render } from "@react-email/components";
 import { format } from "date-fns";
@@ -51,7 +52,7 @@ export const sendInvoiceEmail = async (
 			const pdfBuffer = await downloadPdf(invoice.invoice_pdf);
 			if (pdfBuffer) {
 				attachments.push({
-					filename: `dokploy-invoice-${invoice.number || invoice.id}.pdf`,
+					filename: `deploytide-invoice-${invoice.number || invoice.id}.pdf`,
 					content: pdfBuffer,
 				});
 			}
@@ -59,7 +60,7 @@ export const sendInvoiceEmail = async (
 
 		await sendEmail({
 			email: admin.email,
-			subject: `Dokploy Invoice ${invoice.number || ""} - ${amountFormatted}`,
+			subject: `${BRAND.name} Invoice ${invoice.number || ""} - ${amountFormatted}`,
 			text: htmlContent,
 			attachments,
 		});
@@ -97,7 +98,7 @@ export const sendPaymentFailedEmail = async (
 
 		await sendEmail({
 			email: admin.email,
-			subject: `Action required: Dokploy payment failed - ${amountFormatted}`,
+			subject: `Action required: ${BRAND.name} payment failed - ${amountFormatted}`,
 			text: htmlContent,
 		});
 

@@ -1,4 +1,5 @@
 import { render } from "@react-email/components";
+import { BRAND } from "../brand";
 import InvitationEmail from "../emails/emails/invitation";
 import VerifyEmailTemplate from "../emails/emails/verify-email";
 import { sendEmailNotification } from "../utils/notifications/utils";
@@ -48,7 +49,7 @@ export const sendVerificationEmail = async ({
 	);
 	await sendEmail({
 		email,
-		subject: "Verify your email",
+		subject: `Verify your ${BRAND.name} email`,
 		text: html,
 	});
 };
@@ -87,7 +88,7 @@ export const sendInvitationEmail = async ({
 	});
 	await sendEmail({
 		email,
-		subject: `You've been invited to join ${organizationName} on Dokploy`,
+		subject: `You've been invited to join ${organizationName} on ${BRAND.name}`,
 		text: html,
 	});
 };

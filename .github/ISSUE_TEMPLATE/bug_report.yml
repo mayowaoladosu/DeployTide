@@ -7,7 +7,7 @@ body:
       value: |
         Before opening a new issue, please do a search of existing issues.
 
-        If you need help with your own project, you can start a discussion in the [Q&A Section](https://github.com/Dokploy/dokploy/discussions).
+        If you need help with your own project, start a discussion in the [Q&A section](https://github.com/mayowaoladosu/DeployTide/discussions).
   - type: textarea
     attributes:
       label: To Reproduce
@@ -43,8 +43,8 @@ body:
         Operating System:
           OS: Ubuntu 20.04
           Arch: arm64
-        Dokploy version: 0.2.2'
-        VPS Provider: DigitalOcean, Hetzner, Linode, etc.
+        DeployTide version or commit:
+        Browser:
         What applications/services are you tying to deploy?
          eg - Database, Nextjs App, laravel, etc.
     validations:
@@ -60,18 +60,9 @@ body:
         - "Docker Compose"
         - "Traefik"
         - "Docker"
-        - "Remote server"
+        - "Runtime"
         - "Local Development"
         - "Cloud Version"
-    validations:
-      required: true
-  - type: dropdown
-    attributes:
-      label: Are you deploying the applications where Dokploy is installed or on a remote server?
-      options:
-        - "Same server where Dokploy is installed"
-        - "Remote server"
-        - "Both"
     validations:
       required: true
   - type: textarea

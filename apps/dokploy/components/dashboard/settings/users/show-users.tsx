@@ -1,7 +1,6 @@
 import { format } from "date-fns";
 import { Loader2, MoreHorizontal, Users } from "lucide-react";
 import { toast } from "sonner";
-import { AlertBlock } from "@/components/shared/alert-block";
 import { DialogAction } from "@/components/shared/dialog-action";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -37,18 +36,9 @@ export const ShowUsers = () => {
 	const { data, isPending, refetch } = api.user.all.useQuery();
 	const { mutateAsync } = api.user.remove.useMutation();
 	const { data: permissions } = api.user.getPermissions.useQuery();
-	const { data: hasValidLicense } =
-		api.licenseKey.haveValidLicenseKey.useQuery();
 
 	const utils = api.useUtils();
 	const { data: session } = api.user.session.useQuery();
-
-	const FREE_ROLES = ["owner", "admin", "member"];
-	const membersWithCustomRoles = data?.filter(
-		(member) => !FREE_ROLES.includes(member.role),
-	);
-	const hasCustomRolesWithoutLicense =
-		!hasValidLicense && (membersWithCustomRoles?.length ?? 0) > 0;
 
 	return (
 		<div className="w-full">
@@ -60,7 +50,7 @@ export const ShowUsers = () => {
 							Users
 						</CardTitle>
 						<CardDescription>
-							Add your users to your Dokploy account.
+							Manage the people who can access this workspace.
 						</CardDescription>
 					</CardHeader>
 					<CardContent className="space-y-2 py-8 border-t">
@@ -75,23 +65,11 @@ export const ShowUsers = () => {
 									<div className="flex flex-col items-center gap-3  min-h-[25vh] justify-center">
 										<Users className="size-8 self-center text-muted-foreground" />
 										<span className="text-base text-muted-foreground">
-											Invite users to your Dokploy account
+											Invite people to this workspace
 										</span>
 									</div>
 								) : (
 									<div className="flex flex-col gap-4  min-h-[25vh]">
-										{hasCustomRolesWithoutLicense && (
-											<AlertBlock type="warning">
-												You have{" "}
-												{membersWithCustomRoles?.length === 1
-													? "1 user"
-													: `${membersWithCustomRoles?.length} users`}{" "}
-												assigned to custom roles. Custom roles will not work
-												without a valid Enterprise license. Please activate your
-												license or change these users to a free role (Admin or
-												Member).
-											</AlertBlock>
-										)}
 										<Table>
 											<TableHeader>
 												<TableRow>
@@ -225,10 +203,9 @@ export const ShowUsers = () => {
 																				/>
 																			)}
 
-																			{canEditPermissions && (
+																			{canEditPermissions && member.role === "member" && (
 																				<AddUserPermissions
 																					userId={member.user.id}
-																					role={member.role}
 																				/>
 																			)}
 

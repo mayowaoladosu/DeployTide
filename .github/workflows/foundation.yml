@@ -1,0 +1,109 @@
+name: Foundation
+
+on:
+  push:
+    branches: [deploytide]
+  pull_request:
+    branches: [deploytide]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: foundation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  license-and-types:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.4.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify license boundaries
+        run: pnpm check:license-boundaries
+
+      - name: Verify product boundaries
+        run: pnpm check:product-boundaries
+
+      - name: Type-check server
+        run: pnpm --filter=server typecheck
+
+      - name: Type-check web application
+        run: pnpm --filter=deploytide typecheck
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.4.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install compatibility builders
+        run: |
+          export NIXPACKS_VERSION=1.41.0
+          export RAILPACK_VERSION=0.15.4
+          curl --proto '=https' --tlsv1.2 -fsSL https://nixpacks.com/install.sh | bash
+          curl --proto '=https' --tlsv1.2 -fsSL https://railpack.com/install.sh | bash
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Initialize compatibility runtime
+        run: |
+          docker swarm init
+          docker network create --driver overlay dokploy-network
+
+      - name: Run unit tests
+        run: pnpm --filter=deploytide test
+
+  build:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOYTIDE_BUILD: "true"
+      DEPLOYTIDE_PUBLIC_URL: https://app.deploytide.com
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.4.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Prepare production environment templates
+        run: |
+          cp apps/dokploy/.env.production.example .env.production
+          cp apps/dokploy/.env.production.example apps/dokploy/.env.production
+
+      - name: Build web and server bundles
+        run: pnpm deploytide:build

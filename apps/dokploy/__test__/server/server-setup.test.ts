@@ -42,7 +42,7 @@ const runReport = (sandboxPath: string) => {
 		.pop();
 };
 
-describe("reportDockerVersion", () => {
+describe.skipIf(process.platform === "win32")("reportDockerVersion", () => {
 	it("reports the engine version when docker and its daemon are available", () => {
 		const sandbox = makeSandbox(
 			[

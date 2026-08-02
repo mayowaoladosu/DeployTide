@@ -1,5 +1,4 @@
-import type { AuditAction, AuditResourceType } from "@dokploy/server/db/schema";
-import { createAuditLog } from "@dokploy/server/services/proprietary/audit-log";
+import { recordActivity } from "@dokploy/server/services/activity";
 
 interface AuditCtx {
 	user: { id: string; email: string; role: string };
@@ -7,22 +6,22 @@ interface AuditCtx {
 }
 
 interface AuditEvent {
-	action: AuditAction;
-	resourceType: AuditResourceType;
+	action: string;
+	resourceType: string;
 	resourceId?: string;
 	resourceName?: string;
 	metadata?: Record<string, unknown>;
 }
 
 /**
- * Creates an audit log entry from a tRPC context.
+ * Emits a structured operational activity event from a tRPC context.
  * Extracts userId, userEmail, userRole and organizationId automatically.
  *
  * Usage:
  *   await audit(ctx, { action: "create", resourceType: "project", resourceName: "my-app" });
  */
 export const audit = (ctx: AuditCtx, event: AuditEvent) =>
-	createAuditLog({
+	recordActivity({
 		organizationId: ctx.session.activeOrganizationId,
 		userId: ctx.user.id,
 		userEmail: ctx.user.email,

@@ -104,9 +104,16 @@ export const removeUserById = async (userId: string) => {
 		.then((res) => res[0]);
 };
 
-export const getDokployUrl = async () => {
+export const getDeployTideUrl = async () => {
 	if (IS_CLOUD) {
-		return "https://app.dokploy.com";
+		const publicUrl = process.env.DEPLOYTIDE_PUBLIC_URL;
+		if (publicUrl) {
+			return publicUrl.replace(/\/$/, "");
+		}
+		if (process.env.NODE_ENV === "development") {
+			return `http://localhost:${process.env.PORT || 3000}`;
+		}
+		throw new Error("DEPLOYTIDE_PUBLIC_URL is required in managed mode");
 	}
 	const settings = await getWebServerSettings();
 
@@ -116,6 +123,9 @@ export const getDokployUrl = async () => {
 	}
 	return `http://${settings?.serverIp}:${process.env.PORT}`;
 };
+
+/** @deprecated Internal compatibility alias. Use getDeployTideUrl. */
+export const getDokployUrl = getDeployTideUrl;
 
 const TRUSTED_ORIGINS_CACHE_TTL_MS = 30 * 60_000;
 let trustedOriginsCache: { data: string[]; expiresAt: number } | null = null;
@@ -159,12 +169,5 @@ export const getTrustedOrigins = async () => {
 		return [];
 	}
 };
+// Trusted origins stay runtime-resolved; builds use the explicit build-mode path.
 
-export const getTrustedProviders = async () => {
-	try {
-		const providers = await db.query.ssoProvider.findMany();
-		return providers.map((provider) => provider.providerId);
-	} catch (error) {
-		return [];
-	}
-};

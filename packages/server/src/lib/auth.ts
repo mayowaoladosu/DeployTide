@@ -1,22 +1,20 @@
 import type { IncomingMessage } from "node:http";
 import { apiKey } from "@better-auth/api-key";
-import { scim } from "@better-auth/scim";
-import { sso } from "@better-auth/sso";
 import * as bcrypt from "bcrypt";
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { APIError, createAuthMiddleware } from "better-auth/api";
 import { admin, organization, twoFactor } from "better-auth/plugins";
 import { and, desc, eq } from "drizzle-orm";
+import { BRAND } from "../brand";
 import { IS_CLOUD } from "../constants";
 import { db } from "../db";
 import * as schema from "../db/schema";
 import {
 	getTrustedOrigins,
-	getTrustedProviders,
 	getUserByToken,
 } from "../services/admin";
-import { createAuditLog } from "../services/proprietary/audit-log";
+import { recordActivity } from "../services/activity";
 import {
 	getWebServerSettings,
 	updateWebServerSettings,
@@ -32,6 +30,10 @@ import { betterAuthSecret } from "./auth-secret";
 
 const resolveTrustedOrigins = async () => {
 	try {
+		if (process.env.DEPLOYTIDE_BUILD === "true") {
+			const publicUrl = process.env.DEPLOYTIDE_PUBLIC_URL;
+			return publicUrl ? [new URL(publicUrl).origin] : [];
+		}
 		if (IS_CLOUD) {
 			return await getTrustedOrigins();
 		}
@@ -68,7 +70,6 @@ const createBetterAuth = () =>
 			schema: schema,
 		}),
 		disabledPaths: [
-			"/sso/register",
 			"/organization/create",
 			"/organization/update",
 			"/organization/delete",
@@ -92,14 +93,11 @@ const createBetterAuth = () =>
 		account: {
 			accountLinking: {
 				enabled: true,
-				async trustedProviders() {
-					const fromDb = await getTrustedProviders();
-					return ["github", "google", ...fromDb];
-				},
+				trustedProviders: ["github", "google"],
 				allowDifferentEmails: true,
 			},
 		},
-		appName: "Dokploy",
+		appName: BRAND.name,
 		socialProviders: {
 			github: {
 				clientId: process.env.GITHUB_CLIENT_ID as string,
@@ -164,12 +162,13 @@ const createBetterAuth = () =>
 				create: {
 					before: async (_user, context) => {
 						if (!IS_CLOUD) {
-							const xDokployToken =
+							const invitationToken =
+								context?.request?.headers?.get("x-deploytide-token") ??
 								context?.request?.headers?.get("x-dokploy-token");
-							if (xDokployToken) {
+							if (invitationToken) {
 								let invitation: Awaited<ReturnType<typeof getUserByToken>>;
 								try {
-									invitation = await getUserByToken(xDokployToken);
+									invitation = await getUserByToken(invitationToken);
 								} catch {
 									throw new APIError("BAD_REQUEST", {
 										message: "Invalid invitation token",
@@ -194,11 +193,6 @@ const createBetterAuth = () =>
 									});
 								}
 							} else {
-								const isSSORequest = context?.path.includes("/sso");
-								const isSCIMRequest = context?.path.includes("/scim");
-								if (isSSORequest || isSCIMRequest) {
-									return;
-								}
 								const isAdminPresent = await db.query.member.findFirst({
 									where: eq(schema.member.role, "owner"),
 								});
@@ -211,8 +205,6 @@ const createBetterAuth = () =>
 						}
 					},
 					after: async (user, context) => {
-						const isSSORequest = context?.path.includes("/sso");
-						const isSCIMRequest = context?.path.includes("/scim");
 						const isAdminPresent = await db.query.member.findFirst({
 							where: eq(schema.member.role, "owner"),
 						});
@@ -248,10 +240,6 @@ const createBetterAuth = () =>
 							}
 						}
 
-						if (isSCIMRequest) {
-							return;
-						}
-
 						if (IS_CLOUD || !isAdminPresent) {
 							await db.transaction(async (tx) => {
 								const organization = await tx
@@ -271,29 +259,6 @@ const createBetterAuth = () =>
 									createdAt: new Date(),
 									isDefault: true, // Mark first organization as default
 								});
-							});
-						} else if (isSSORequest) {
-							const providerId = context?.params?.providerId;
-							if (!providerId) {
-								throw new APIError("BAD_REQUEST", {
-									message: "Provider ID is required",
-								});
-							}
-							const provider = await db.query.ssoProvider.findFirst({
-								where: eq(schema.ssoProvider.providerId, providerId),
-							});
-
-							if (!provider) {
-								throw new APIError("BAD_REQUEST", {
-									message: "Provider not found",
-								});
-							}
-							await db.insert(schema.member).values({
-								userId: user.id,
-								organizationId: provider?.organizationId || "",
-								role: "member",
-								createdAt: new Date(),
-								isDefault: true,
 							});
 						}
 					},
@@ -335,7 +300,7 @@ const createBetterAuth = () =>
 							with: { user: true },
 						});
 						if (!memberRecord) return;
-						await createAuditLog({
+						await recordActivity({
 							organizationId: orgId,
 							userId: session.userId,
 							userEmail: memberRecord.user.email,
@@ -359,7 +324,7 @@ const createBetterAuth = () =>
 							with: { user: true },
 						});
 						if (!memberRecord) return;
-						await createAuditLog({
+						await recordActivity({
 							organizationId: orgId,
 							userId: session.userId,
 							userEmail: memberRecord.user.email,
@@ -402,37 +367,12 @@ const createBetterAuth = () =>
 					input: true,
 					defaultValue: "",
 				},
-				enableEnterpriseFeatures: {
-					type: "boolean",
-					required: false,
-					input: false,
-				},
-				isValidEnterpriseLicense: {
-					type: "boolean",
-					required: false,
-					input: false,
-				},
 			},
 		},
 		plugins: [
 			apiKey({
 				enableMetadata: true,
 				references: "user",
-			}),
-			sso({ trustEmailVerified: true }),
-			scim({
-				beforeSCIMTokenGenerated: async ({ user }) => {
-					const dbUser = await db.query.user.findFirst({
-						where: eq(schema.user.id, user.id),
-						columns: { enableEnterpriseFeatures: true },
-					});
-
-					if (!dbUser?.enableEnterpriseFeatures) {
-						throw new APIError("FORBIDDEN", {
-							message: "SCIM provisioning requires an enterprise license",
-						});
-					}
-				},
 			}),
 			twoFactor(),
 			organization({
@@ -442,14 +382,8 @@ const createBetterAuth = () =>
 					admin: adminRole,
 					member: memberRole,
 				},
-				dynamicAccessControl: {
-					enabled: true,
-					maximumRolesPerOrganization: 10,
-				},
 			}),
-			// Self-hosted needs the admin plugin too: SCIM deactivation (active: false)
-			// maps to the admin plugin's `banned` field and is rejected without it.
-			// adminRoles: [] keeps every /admin/* endpoint locked on self-hosted.
+			// Keep every /admin/* endpoint locked on self-hosted instances.
 			admin(
 				IS_CLOUD
 					? { adminUserIds: [process.env.USER_ADMIN_ID as string] }
@@ -473,11 +407,6 @@ const { handler, api } = globalForAuth.betterAuthInstance;
 const _auth = {
 	handler,
 	createApiKey: api.createApiKey,
-	registerSSOProvider: api.registerSSOProvider,
-	updateSSOProvider: api.updateSSOProvider,
-	generateSCIMToken: api.generateSCIMToken,
-	listSCIMProviderConnections: api.listSCIMProviderConnections,
-	deleteSCIMProviderConnection: api.deleteSCIMProviderConnection,
 };
 
 export type AuthType = typeof _auth;
@@ -562,8 +491,6 @@ export const validateRequest = async (request: IncomingMessage) => {
 					twoFactorEnabled: userFromDb.twoFactorEnabled,
 					role: member?.role || "member",
 					ownerId: member?.organization.ownerId || apiKeyRecord.user.id,
-					enableEnterpriseFeatures: userFromDb.enableEnterpriseFeatures,
-					isValidEnterpriseLicense: userFromDb.isValidEnterpriseLicense,
 				},
 			};
 
@@ -612,10 +539,6 @@ export const validateRequest = async (request: IncomingMessage) => {
 		});
 
 		session.user.role = member?.role || "member";
-		session.user.enableEnterpriseFeatures =
-			member?.user.enableEnterpriseFeatures || false;
-		session.user.isValidEnterpriseLicense =
-			member?.user.isValidEnterpriseLicense || false;
 		session.session.activeOrganizationId = member?.organization.id || "";
 		if (member) {
 			session.user.ownerId = member.organization.ownerId;

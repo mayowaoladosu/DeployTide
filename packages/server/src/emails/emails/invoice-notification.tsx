@@ -15,6 +15,7 @@ import {
 	Tailwind,
 	Text,
 } from "@react-email/components";
+import { BRAND } from "../../brand";
 import { emailTailwindConfig } from "../tailwind-config";
 
 export type TemplateProps = {
@@ -34,7 +35,7 @@ export const InvoiceNotificationEmail = ({
 	date = "2024-01-01",
 	hostedInvoiceUrl = "https://invoice.stripe.com/example",
 }: TemplateProps) => {
-	const previewText = `Your Dokploy invoice ${invoiceNumber} for ${amountPaid} is ready`;
+	const previewText = `Your ${BRAND.name} invoice ${invoiceNumber} for ${amountPaid} is ready`;
 	return (
 		<Html>
 			<Head />
@@ -45,10 +46,10 @@ export const InvoiceNotificationEmail = ({
 						{/* Header */}
 						<Section className="bg-[#09090b] rounded-t-xl px-[40px] py-[32px] text-center">
 							<Img
-								src="https://raw.githubusercontent.com/Dokploy/website/refs/heads/main/apps/docs/public/logo-dokploy-blackpng.png"
+								src={BRAND.emailLogoUrl}
 								width="190"
 								height="120"
-								alt="Dokploy"
+								alt={BRAND.name}
 								className="my-0 mx-auto"
 							/>
 						</Section>
@@ -136,15 +137,15 @@ export const InvoiceNotificationEmail = ({
 							<Text className="text-[#a1a1aa] text-[12px] leading-[18px] m-0">
 								This is an automated email from{" "}
 								<Link
-									href="https://dokploy.com"
+									href={BRAND.repositoryUrl}
 									className="text-[#71717a] underline"
 								>
-									Dokploy Cloud
+									{BRAND.name}
 								</Link>
 								. If you have any questions about your billing, please contact
 								our{" "}
 								<Link
-									href="https://discord.gg/2tBnJ3jDJc"
+									href={BRAND.issuesUrl}
 									className="text-[#71717a] underline"
 								>
 									support team

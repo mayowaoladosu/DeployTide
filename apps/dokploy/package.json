@@ -1,11 +1,11 @@
 {
-	"name": "dokploy",
+	"name": "deploytide",
 	"version": "v0.29.13",
 	"private": true,
 	"license": "Apache-2.0",
 	"type": "module",
 	"scripts": {
-		"build": "npm run build-server && npm run build-next",
+		"build": "node scripts/build.mjs",
 		"start": "node -r dotenv/config dist/migration.mjs && node -r dotenv/config dist/server.mjs",
 		"build-server": "tsx esbuild.config.ts",
 		"build-next": "next build --webpack",
@@ -36,8 +36,7 @@
 		"docker:build:canary": "./docker/build.sh canary",
 		"docker:push:canary": "./docker/push.sh canary",
 		"version": "echo $(node -p \"require('./package.json').version\")",
-		"test": "vitest --config __test__/vitest.config.ts",
-		"generate:openapi": "tsx -r dotenv/config scripts/generate-openapi.ts"
+		"test": "vitest run --config __test__/vitest.config.ts"
 	},
 	"dependencies": {
 		"@ai-sdk/anthropic": "^3.0.44",
@@ -48,8 +47,6 @@
 		"@ai-sdk/openai": "^3.0.29",
 		"@ai-sdk/openai-compatible": "^2.0.30",
 		"@better-auth/api-key": "1.6.23",
-		"@better-auth/scim": "1.6.23",
-		"@better-auth/sso": "1.6.23",
 		"@codemirror/autocomplete": "^6.18.6",
 		"@codemirror/lang-css": "^6.3.1",
 		"@codemirror/lang-json": "^6.0.1",

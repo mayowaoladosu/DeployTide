@@ -1,12 +1,12 @@
-# Dokploy Security Policy
+# DeployTide Security Policy
 
-At Dokploy, security is a top priority. We appreciate the help of security researchers and the community in identifying and reporting vulnerabilities.
+Security reports are handled privately and should include enough detail to reproduce and assess the issue.
 
 ## How to Report a Vulnerability
 
-If you have discovered a security vulnerability in Dokploy, we ask that you report it responsibly by following these guidelines:
+If you discover a vulnerability in DeployTide, report it responsibly:
 
-1.  **Contact us:** Send an email to [contact@dokploy.com](mailto:contact@dokploy.com).
+1. **Report privately:** Open a private vulnerability report through [GitHub Security Advisories](https://github.com/mayowaoladosu/DeployTide/security/advisories/new).
 2.  **Provide clear details:** Include as much information as possible to help us understand and reproduce the vulnerability. This should include:
     *   A clear description of the vulnerability.
     *   Steps to reproduce the vulnerability.
@@ -25,4 +25,4 @@ If you have discovered a security vulnerability in Dokploy, we ask that you repo
 
 We are committed to working with you quickly and responsibly to address any legitimate security vulnerability.
 
-Thank you for helping us keep Dokploy secure for everyone.
+Thank you for helping keep DeployTide secure.

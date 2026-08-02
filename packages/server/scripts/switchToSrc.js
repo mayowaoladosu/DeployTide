@@ -27,6 +27,10 @@ pkg.exports = {
 		import: "./src/constants/index.ts",
 		require: "./dist/constants.cjs.js",
 	},
+	"./brand": {
+		import: "./src/brand.ts",
+		require: "./dist/brand.cjs.js",
+	},
 };
 
 // Guardar los cambios en package.json

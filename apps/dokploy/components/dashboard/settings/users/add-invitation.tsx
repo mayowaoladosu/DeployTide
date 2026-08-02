@@ -41,7 +41,7 @@ const addInvitation = z
 			.string()
 			.min(1, "Email is required")
 			.email({ message: "Invalid email" }),
-		role: z.string().min(1, "Role is required"),
+		role: z.enum(["admin", "member"]),
 		notificationId: z.string().optional(),
 		password: z.string().optional(),
 		confirmPassword: z.string().optional(),
@@ -105,7 +105,6 @@ export const AddInvitation = () => {
 	const { mutateAsync: sendInvitation } = api.user.sendInvitation.useMutation();
 	const { mutateAsync: createUserWithCredentials, isPending: isCreating } =
 		api.user.createUserWithCredentials.useMutation();
-	const { data: customRoles } = api.customRole.all.useQuery();
 	const [error, setError] = useState<string | null>(null);
 
 	const form = useForm<AddInvitation>({
@@ -249,7 +248,7 @@ export const AddInvitation = () => {
 									<FormItem>
 										<FormLabel>Email</FormLabel>
 										<FormControl>
-											<Input placeholder={"email@dokploy.com"} {...field} />
+											<Input placeholder="user@example.com" {...field} />
 										</FormControl>
 										<FormDescription>
 											This will be the email of the new user
@@ -279,11 +278,6 @@ export const AddInvitation = () => {
 											<SelectContent>
 												<SelectItem value="member">Member</SelectItem>
 												<SelectItem value="admin">Admin</SelectItem>
-												{customRoles?.map((role) => (
-													<SelectItem key={role.role} value={role.role}>
-														{role.role}
-													</SelectItem>
-												))}
 											</SelectContent>
 										</Select>
 										<FormDescription>
