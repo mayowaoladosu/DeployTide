@@ -4,12 +4,15 @@ import {
 	chmod,
 	lstat,
 	mkdir,
+	mkdtemp,
 	open,
 	readdir,
 	readFile,
 	realpath,
 	rm,
+	writeFile,
 } from "node:fs/promises";
+import { tmpdir } from "node:os";
 import path from "node:path";
 import Dockerode from "dockerode";
 import type {
@@ -83,6 +86,7 @@ type PreparedSecret = {
 	id: string;
 	resolvedPath: string;
 	size: number;
+	stagedPath: string;
 };
 type PreparedOutputDirectory = {
 	gid: number;
@@ -671,10 +675,24 @@ const prepareSecretFiles = async (
 	secrets: BuildRequest["secretFiles"],
 	sourceRoot: string,
 	signal: AbortSignal,
-): Promise<PreparedSecret[]> => {
+): Promise<{ secrets: PreparedSecret[]; stagingDir: string | undefined }> => {
 	if ((secrets?.length ?? 0) > MAX_SECRET_FILES) {
 		throw new Error("Build secret count exceeds worker limits");
 	}
+	if ((secrets?.length ?? 0) === 0) {
+		return { secrets: [], stagingDir: undefined };
+	}
+	// Secrets are staged into a directory this process fully owns rather than
+	// bind-mounted directly from their original host path. The rootless build
+	// client always runs as a fixed, unprivileged uid (1000) that has no
+	// relationship to the calling process's uid, so the original file's mode
+	// and ownership cannot be relied on for readability inside the container.
+	// Each staged copy is deleted once the build finishes.
+	const stagingDir = await raceWithAbort(
+		mkdtemp(path.join(tmpdir(), "dt-buildkit-secrets-")),
+		signal,
+	);
+	await raceWithAbort(chmod(stagingDir, 0o700), signal);
 	const prepared: PreparedSecret[] = [];
 	const ids = new Set<string>();
 	const paths = new Set<string>();
@@ -708,9 +726,21 @@ const prepareSecretFiles = async (
 		}
 		ids.add(secret.id);
 		paths.add(pathKey);
-		prepared.push({ id: secret.id, resolvedPath, size: stats.size });
+		const content = await raceWithAbort(readFile(resolvedPath), signal);
+		const stagedPath = path.join(stagingDir, secret.id);
+		await raceWithAbort(writeFile(stagedPath, content, { mode: 0o400 }), signal);
+		// Readable by any uid: the copy lives inside a 0700 staging directory
+		// that only this process (and root) can traverse, so broadening the
+		// file's own read bit does not expose it outside the ephemeral build.
+		await raceWithAbort(chmod(stagedPath, 0o444), signal);
+		prepared.push({
+			id: secret.id,
+			resolvedPath,
+			size: stats.size,
+			stagedPath,
+		});
 	}
-	return prepared;
+	return { secrets: prepared, stagingDir };
 };
 
 const pullImage = async (
@@ -1570,11 +1600,12 @@ export class RootlessBuildKitProvider implements BuildProvider {
 				throw new Error("Source snapshot digest verification failed");
 			}
 
-			const preparedSecrets = await prepareSecretFiles(
-				request.secretFiles,
-				snapshot.resolvedRoot,
-				deadline.signal,
-			);
+			const { secrets: preparedSecrets, stagingDir: secretsStagingDir } =
+				await prepareSecretFiles(
+					request.secretFiles,
+					snapshot.resolvedRoot,
+					deadline.signal,
+				);
 			const preparedBuildArguments = prepareBuildArguments(request.buildArgs);
 			const requestedOutput = path.resolve(request.outputDirectory);
 			assertDisjointPaths(
@@ -1837,7 +1868,7 @@ export class RootlessBuildKitProvider implements BuildProvider {
 				];
 				const secretArguments: string[] = [];
 				for (const secret of preparedSecrets) {
-					binds.push(`${secret.resolvedPath}:/run/secrets/${secret.id}:ro`);
+					binds.push(`${secret.stagedPath}:/run/secrets/${secret.id}:ro`);
 					secretArguments.push(
 						"--secret",
 						`id=${secret.id},src=/run/secrets/${secret.id}`,
@@ -1951,6 +1982,11 @@ export class RootlessBuildKitProvider implements BuildProvider {
 					stateVolume,
 					workerName,
 				});
+				if (secretsStagingDir) {
+					await rm(secretsStagingDir, { force: true, recursive: true }).catch(
+						() => undefined,
+					);
+				}
 				void Promise.resolve(this.#progress("worker-scrubbed")).catch(
 					() => undefined,
 				);
