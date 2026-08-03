@@ -61,6 +61,7 @@ export const server = pgTable("server", {
 	enableDockerCleanup: boolean("enableDockerCleanup").notNull().default(false),
 	buildsConcurrency: integer("buildsConcurrency").notNull().default(1),
 	createdAt: text("createdAt").notNull(),
+	operatorOwned: boolean("operatorOwned").notNull().default(false),
 	organizationId: text("organizationId")
 		.notNull()
 		.references(() => organization.id, { onDelete: "cascade" }),

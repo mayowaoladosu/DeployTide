@@ -1,0 +1,298 @@
+#cloud-config
+package_update: true
+packages:
+  - ca-certificates
+  - curl
+  - docker.io
+  - openssl
+write_files:
+  - path: /etc/deploytide/trust/controller-ca.pem
+    encoding: b64
+    permissions: "0444"
+    owner: root:root
+    content: "${controller_ca_pem_b64}"
+  - path: /etc/deploytide/trust/job-public-key.pem
+    encoding: b64
+    permissions: "0444"
+    owner: root:root
+    content: "${job_public_key_pem_b64}"
+  - path: /etc/deploytide/enrollment.token
+    encoding: b64
+    permissions: "0600"
+    owner: root:root
+    content: "${enrollment_token_b64}"
+  - path: /etc/deploytide/enrollment.env
+    permissions: "0600"
+    owner: root:root
+    content: |
+      DEPLOYTIDE_RUNTIME_CLUSTER_ID_B64=${runtime_cluster_id_b64}
+      DEPLOYTIDE_RUNTIME_TARGET_ID_B64=${runtime_target_id_b64}
+      DEPLOYTIDE_ENROLLMENT_URL_B64=${enrollment_url_b64}
+  - path: /etc/deploytide/controller.env
+    permissions: "0600"
+    owner: root:root
+    content: |
+      DEPLOYTIDE_CLUSTER_ID=${runtime_cluster_id}
+      DEPLOYTIDE_RUNTIME_TARGET_ID=${runtime_target_id}
+      DEPLOYTIDE_CONTROL_PLANE_URL=${control_plane_url}
+      DEPLOYTIDE_DOCKER_SOCKET=/run/deploytide-proxy/docker.sock
+      DEPLOYTIDE_DOCKER_API_VERSION=${docker_api_version}
+      DEPLOYTIDE_CONTROLLER_STATE_FILE=/var/lib/deploytide/controller-state/controller-state.json
+      DEPLOYTIDE_MTLS_CA_FILE=/etc/deploytide/trust/controller-ca.pem
+      DEPLOYTIDE_MTLS_CERT_FILE=/var/lib/deploytide/controller-identity/controller.pem
+      DEPLOYTIDE_MTLS_KEY_FILE=/var/lib/deploytide/controller-identity/controller-key.pem
+      DEPLOYTIDE_MTLS_SERVER_NAME=${mtls_server_name}
+      DEPLOYTIDE_JOB_PUBLIC_KEY_FILE=/etc/deploytide/trust/job-public-key.pem
+  - path: /etc/tmpfiles.d/deploytide-runtime.conf
+    permissions: "0644"
+    owner: root:root
+    content: |
+      d /run/deploytide-proxy 0750 65532 65532 -
+      d /var/lib/deploytide 0750 65532 65532 -
+      d /var/lib/deploytide/controller-state 0700 65532 65532 -
+      d /var/lib/deploytide/controller-identity 0700 65532 65532 -
+  - path: /usr/local/sbin/deploytide-prepare-runtime
+    permissions: "0755"
+    owner: root:root
+    content: |
+      #!/bin/sh
+      set -eu
+      install -d -m 0750 -o 65532 -g 65532 /run/deploytide-proxy
+      install -d -m 0700 -o 65532 -g 65532 /var/lib/deploytide/controller-state
+      install -d -m 0700 -o 65532 -g 65532 /var/lib/deploytide/controller-identity
+      if [ -e /var/lib/deploytide/controller-identity/controller-key.pem ]; then
+        chown 65532:65532 /var/lib/deploytide/controller-identity/controller-key.pem
+        chmod 0400 /var/lib/deploytide/controller-identity/controller-key.pem
+      fi
+      if [ -e /var/lib/deploytide/controller-identity/controller.pem ]; then
+        chown 65532:65532 /var/lib/deploytide/controller-identity/controller.pem
+        chmod 0440 /var/lib/deploytide/controller-identity/controller.pem
+      fi
+  - path: /usr/local/sbin/deploytide-enroll-controller
+    permissions: "0750"
+    owner: root:root
+    content: |
+      #!/bin/sh
+      set -eu
+
+      enrollment_file=/etc/deploytide/enrollment.env
+      token_file=/etc/deploytide/enrollment.token
+      trust_file=/etc/deploytide/trust/controller-ca.pem
+      identity_dir=/var/lib/deploytide/controller-identity
+      key_file=$identity_dir/controller-key.pem
+      csr_file=$identity_dir/controller.csr
+      cert_file=$identity_dir/controller.pem
+      cert_temporary=$identity_dir/controller.pem.new
+
+      decode() {
+        printf '%s' "$1" | base64 -d
+      }
+
+      . "$enrollment_file"
+      cluster_id=$(decode "$DEPLOYTIDE_RUNTIME_CLUSTER_ID_B64")
+      runtime_target_id=$(decode "$DEPLOYTIDE_RUNTIME_TARGET_ID_B64")
+      enrollment_url=$(decode "$DEPLOYTIDE_ENROLLMENT_URL_B64")
+      expected_uri=spiffe://deploytide/runtime-cluster/$cluster_id/runtime-target/$runtime_target_id
+
+      valid_identity() {
+        [ -s "$key_file" ] && [ -s "$cert_file" ] &&
+          openssl x509 -in "$cert_file" -noout -checkend 300 >/dev/null 2>&1 &&
+          openssl verify -purpose sslclient -CAfile "$trust_file" "$cert_file" >/dev/null 2>&1 &&
+          openssl x509 -in "$cert_file" -noout -text 2>/dev/null | grep -F "$expected_uri" >/dev/null &&
+          [ "$(openssl pkey -in "$key_file" -pubout -outform DER 2>/dev/null | sha256sum | cut -d ' ' -f 1)" = "$(openssl x509 -in "$cert_file" -pubkey -noout 2>/dev/null | openssl pkey -pubin -outform DER 2>/dev/null | sha256sum | cut -d ' ' -f 1)" ]
+      }
+
+      /usr/local/sbin/deploytide-prepare-runtime
+      if valid_identity; then
+        rm -f "$token_file" "$csr_file" "$cert_temporary"
+        exit 0
+      fi
+      rm -f "$cert_file" "$cert_temporary"
+      [ -s "$token_file" ] || {
+        echo "DeployTide controller enrollment token is unavailable" >&2
+        exit 1
+      }
+
+      umask 077
+      if [ ! -s "$key_file" ]; then
+        openssl genpkey -algorithm ED25519 -out "$key_file"
+      fi
+      chown 65532:65532 "$key_file"
+      chmod 0400 "$key_file"
+      openssl req -new -key "$key_file" \
+        -subj "/CN=deploytide-controller-$cluster_id" \
+        -addext "subjectAltName=URI:$expected_uri" \
+        -out "$csr_file"
+
+      enrollment_token=$(cat "$token_file")
+      case "$enrollment_token" in
+        ''|*[!A-Za-z0-9_-]*)
+          echo "DeployTide controller enrollment token is malformed" >&2
+          exit 1
+          ;;
+      esac
+      printf 'header = "Authorization: Bearer %s"\n' "$enrollment_token" | \
+        curl --config - --fail --silent --show-error \
+          --proto '=https' --tlsv1.3 \
+          --connect-timeout 10 --max-time 30 --max-filesize 1048576 \
+          --cacert "$trust_file" \
+          --request POST \
+          --header 'Accept: application/x-pem-file' \
+          --header 'Content-Type: application/pkcs10' \
+          --header "X-DeployTide-Runtime-Cluster-Id: $cluster_id" \
+          --header "X-DeployTide-Runtime-Target-Id: $runtime_target_id" \
+          --data-binary "@$csr_file" \
+          --output "$cert_temporary" \
+          "$enrollment_url"
+      unset enrollment_token
+
+      openssl x509 -in "$cert_temporary" -noout -checkend 300 >/dev/null
+      openssl verify -purpose sslclient -CAfile "$trust_file" "$cert_temporary" >/dev/null
+      openssl x509 -in "$cert_temporary" -noout -text | grep -F "$expected_uri" >/dev/null
+      key_digest=$(openssl pkey -in "$key_file" -pubout -outform DER | sha256sum | cut -d ' ' -f 1)
+      cert_digest=$(openssl x509 -in "$cert_temporary" -pubkey -noout | openssl pkey -pubin -outform DER | sha256sum | cut -d ' ' -f 1)
+      [ "$key_digest" = "$cert_digest" ]
+
+      mv "$cert_temporary" "$cert_file"
+      chown 65532:65532 "$cert_file"
+      chmod 0440 "$cert_file"
+      rm -f "$token_file" "$csr_file"
+  - path: /usr/local/sbin/deploytide-run-docker-proxy
+    permissions: "0755"
+    owner: root:root
+    content: |
+      #!/bin/sh
+      set -eu
+      /usr/local/sbin/deploytide-prepare-runtime
+      socket_gid=$(stat -c '%g' /var/run/docker.sock)
+      exec /usr/bin/docker run --rm --pull never \
+        --name deploytide-docker-proxy \
+        --user 65532:65532 \
+        --group-add "$socket_gid" \
+        --read-only \
+        --cap-drop ALL \
+        --security-opt no-new-privileges \
+        --network none \
+        --pids-limit 64 \
+        --memory 64m \
+        --cpus 0.25 \
+        --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock,readonly \
+        --mount type=bind,src=/run/deploytide-proxy,dst=/run/deploytide-proxy \
+        --env DEPLOYTIDE_RAW_DOCKER_SOCKET=/var/run/docker.sock \
+        --env DEPLOYTIDE_PROXY_LISTEN_SOCKET=/run/deploytide-proxy/docker.sock \
+        --env DEPLOYTIDE_DOCKER_API_VERSION=${docker_api_version} \
+        --label com.deploytide.component=docker-proxy \
+        ${docker_proxy_image}
+  - path: /usr/local/sbin/deploytide-run-runtime-controller
+    permissions: "0755"
+    owner: root:root
+    content: |
+      #!/bin/sh
+      set -eu
+      /usr/local/sbin/deploytide-prepare-runtime
+      exec /usr/bin/docker run --rm --pull never \
+        --name deploytide-runtime-controller \
+        --user 65532:65532 \
+        --read-only \
+        --cap-drop ALL \
+        --security-opt no-new-privileges \
+        --network bridge \
+        --pids-limit 128 \
+        --memory 128m \
+        --cpus 0.50 \
+        --tmpfs /tmp:rw,nosuid,nodev,noexec,size=16m,uid=65532,gid=65532 \
+        --mount type=bind,src=/run/deploytide-proxy,dst=/run/deploytide-proxy,readonly \
+        --mount type=bind,src=/etc/deploytide/trust,dst=/etc/deploytide/trust,readonly \
+        --mount type=bind,src=/var/lib/deploytide/controller-identity,dst=/var/lib/deploytide/controller-identity,readonly \
+        --mount type=bind,src=/var/lib/deploytide/controller-state,dst=/var/lib/deploytide/controller-state \
+        --env-file /etc/deploytide/controller.env \
+        --label com.deploytide.component=runtime-controller \
+        ${controller_image}
+  - path: /etc/systemd/system/deploytide-controller-enrollment.service
+    permissions: "0644"
+    owner: root:root
+    content: |
+      [Unit]
+      Description=Enroll DeployTide runtime controller identity
+      Wants=network-online.target
+      After=network-online.target systemd-tmpfiles-setup.service
+      Before=deploytide-runtime-controller.service
+
+      [Service]
+      Type=oneshot
+      ExecStartPre=/usr/local/sbin/deploytide-prepare-runtime
+      ExecStart=/usr/local/sbin/deploytide-enroll-controller
+      RemainAfterExit=yes
+      NoNewPrivileges=yes
+      PrivateDevices=yes
+      PrivateTmp=yes
+      ProtectHome=yes
+      ProtectSystem=strict
+      ReadWritePaths=-/etc/deploytide/enrollment.token /run/deploytide-proxy /var/lib/deploytide/controller-state /var/lib/deploytide/controller-identity
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/deploytide-docker-proxy.service
+    permissions: "0644"
+    owner: root:root
+    content: |
+      [Unit]
+      Description=DeployTide constrained Docker Unix-socket proxy
+      Requires=docker.service
+      After=docker.service systemd-tmpfiles-setup.service
+      Before=deploytide-runtime-controller.service
+
+      [Service]
+      Type=simple
+      ExecStartPre=/usr/local/sbin/deploytide-prepare-runtime
+      ExecStartPre=-/usr/bin/docker rm -f deploytide-docker-proxy
+      ExecStartPre=/usr/bin/docker pull ${docker_proxy_image}
+      ExecStart=/usr/local/sbin/deploytide-run-docker-proxy
+      ExecStop=-/usr/bin/docker stop -t 10 deploytide-docker-proxy
+      Restart=always
+      RestartSec=3
+      TimeoutStopSec=20
+      NoNewPrivileges=yes
+      PrivateDevices=yes
+      PrivateTmp=yes
+      ProtectHome=yes
+      ProtectSystem=strict
+      ReadWritePaths=/run/deploytide-proxy /var/lib/deploytide/controller-state /var/lib/deploytide/controller-identity
+
+      [Install]
+      WantedBy=multi-user.target
+  - path: /etc/systemd/system/deploytide-runtime-controller.service
+    permissions: "0644"
+    owner: root:root
+    content: |
+      [Unit]
+      Description=DeployTide constrained runtime controller
+      Requires=docker.service deploytide-controller-enrollment.service deploytide-docker-proxy.service
+      After=docker.service deploytide-controller-enrollment.service deploytide-docker-proxy.service network-online.target systemd-tmpfiles-setup.service
+
+      [Service]
+      Type=simple
+      ExecStartPre=/usr/local/sbin/deploytide-prepare-runtime
+      ExecStartPre=-/usr/bin/docker rm -f deploytide-runtime-controller
+      ExecStartPre=/usr/bin/docker pull ${controller_image}
+      ExecStart=/usr/local/sbin/deploytide-run-runtime-controller
+      ExecStop=-/usr/bin/docker stop -t 15 deploytide-runtime-controller
+      Restart=always
+      RestartSec=3
+      TimeoutStopSec=25
+      NoNewPrivileges=yes
+      PrivateDevices=yes
+      PrivateTmp=yes
+      ProtectHome=yes
+      ProtectSystem=strict
+      ReadWritePaths=/run/deploytide-proxy /var/lib/deploytide/controller-state /var/lib/deploytide/controller-identity
+
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  - [systemd-tmpfiles, --create, /etc/tmpfiles.d/deploytide-runtime.conf]
+  - [/usr/local/sbin/deploytide-prepare-runtime]
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, --now, deploytide-controller-enrollment.service]
+  - [systemctl, enable, --now, deploytide-docker-proxy.service]
+  - [systemctl, enable, --now, deploytide-runtime-controller.service]

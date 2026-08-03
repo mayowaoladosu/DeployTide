@@ -42,6 +42,9 @@ jobs:
       - name: Verify customer product shell
         run: pnpm check:product-shell
 
+      - name: Verify operator infrastructure boundaries
+        run: pnpm check:infrastructure-boundaries
+
       - name: Type-check server
         run: pnpm --filter=server typecheck
 
@@ -167,3 +170,144 @@ jobs:
 
       - name: Build web and server bundles
         run: pnpm deploytide:build
+
+  infrastructure-controller:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.6"
+          cache-dependency-path: apps/runtime-controller/go.mod
+
+      - name: Verify Go formatting and static analysis
+        working-directory: apps/runtime-controller
+        run: |
+          unformatted="$(find . -type f -name '*.go' -print0 | xargs -0 gofmt -l)"
+          test -z "$unformatted"
+          go vet ./...
+
+      - name: Test constrained runtime controller and Docker proxy
+        working-directory: apps/runtime-controller
+        run: go test ./...
+
+      - name: Build both Go binaries
+        working-directory: apps/runtime-controller
+        run: |
+          go build -trimpath -o /tmp/deploytide-runtime-controller .
+          go build -trimpath -o /tmp/deploytide-docker-proxy ./cmd/docker-proxy
+
+      - name: Build non-root controller and proxy images
+        run: |
+          docker build -t deploytide/runtime-controller:ci apps/runtime-controller
+          docker build -f apps/runtime-controller/Dockerfile.proxy -t deploytide/docker-proxy:ci apps/runtime-controller
+
+      - name: Verify controller and proxy image policies
+        run: |
+          test "$(docker image inspect deploytide/runtime-controller:ci --format '{{.Config.User}}')" = "65532:65532"
+          test "$(docker image inspect deploytide/runtime-controller:ci --format '{{json .Config.ExposedPorts}}')" = "null"
+          test "$(docker image inspect deploytide/docker-proxy:ci --format '{{.Config.User}}')" = "65532:65532"
+          test "$(docker image inspect deploytide/docker-proxy:ci --format '{{json .Config.ExposedPorts}}')" = "null"
+
+      - name: Smoke constrained Unix-socket proxy policy
+        run: |
+          set -euo pipefail
+          socket_dir="$(mktemp -d)"
+          sudo chown 65532:65532 "$socket_dir"
+          sudo chmod 0755 "$socket_dir"
+          socket_gid="$(stat -c '%g' /var/run/docker.sock)"
+          cleanup() {
+            docker rm -f deploytide-docker-proxy-ci >/dev/null 2>&1 || true
+            sudo rm -rf "$socket_dir"
+          }
+          trap cleanup EXIT
+          docker run -d --name deploytide-docker-proxy-ci \
+            --user 65532:65532 \
+            --group-add "$socket_gid" \
+            --read-only \
+            --cap-drop ALL \
+            --security-opt no-new-privileges \
+            --network none \
+            --mount type=bind,src=/var/run/docker.sock,dst=/var/run/docker.sock,readonly \
+            --mount type=bind,src="$socket_dir",dst=/run/deploytide-proxy \
+            --env DEPLOYTIDE_RAW_DOCKER_SOCKET=/var/run/docker.sock \
+            --env DEPLOYTIDE_PROXY_LISTEN_SOCKET=/run/deploytide-proxy/docker.sock \
+            --env DEPLOYTIDE_DOCKER_API_VERSION=v1.47 \
+            deploytide/docker-proxy:ci
+          for attempt in $(seq 1 50); do
+            test -S "$socket_dir/docker.sock" && break
+            sleep 0.1
+          done
+          test -S "$socket_dir/docker.sock"
+          test "$(docker inspect deploytide-docker-proxy-ci --format '{{.HostConfig.NetworkMode}}')" = "none"
+          test "$(docker inspect deploytide-docker-proxy-ci --format '{{.HostConfig.ReadonlyRootfs}}')" = "true"
+          test "$(docker inspect deploytide-docker-proxy-ci --format '{{.HostConfig.Privileged}}')" = "false"
+          test "$(docker inspect deploytide-docker-proxy-ci --format '{{json .HostConfig.CapDrop}}')" = '["ALL"]'
+          test "$(docker inspect deploytide-docker-proxy-ci --format '{{json .HostConfig.SecurityOpt}}')" = '["no-new-privileges"]'
+          test "$(sudo curl --silent --show-error --unix-socket "$socket_dir/docker.sock" http://docker/_ping)" = "OK"
+          test "$(sudo curl --silent --output /dev/null --write-out '%{http_code}' --unix-socket "$socket_dir/docker.sock" http://docker/v1.47/containers/json)" = "403"
+
+  infrastructure-provisioning:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up OpenTofu
+        uses: opentofu/setup-opentofu@v1
+        with:
+          tofu_version: 1.12.5
+
+      - name: Install cloud-init and ingress validators
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes haproxy openssl python3-yaml
+
+      - name: Check OpenTofu formatting
+        run: tofu fmt -recursive -check infra/opentofu
+
+      - name: Initialize OpenTofu
+        working-directory: infra/opentofu
+        run: tofu init -backend=false -input=false
+
+      - name: Validate OpenTofu and cloud-init
+        working-directory: infra/opentofu
+        run: tofu validate
+
+      - name: Render and validate sample cloud-init
+        working-directory: infra/opentofu
+        run: |
+          mkdir -p generated
+          tofu apply -auto-approve -input=false -state=/tmp/deploytide-cloud-init.tfstate -var-file=tests/sample.tfvars
+          python3 tests/validate_rendered_cloud_init.py generated
+          rm -f /tmp/deploytide-cloud-init.tfstate /tmp/deploytide-cloud-init.tfstate.backup
+
+      - name: Validate operator mTLS controller ingress
+        run: sh infra/controller-ingress/validate.sh
+
+  buildkit-isolation:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.4.0
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Enable rootless BuildKit prerequisites
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Prove build and runtime plane isolation
+        run: pnpm --filter=deploytide exec tsx scripts/verify-phase4-buildkit.ts

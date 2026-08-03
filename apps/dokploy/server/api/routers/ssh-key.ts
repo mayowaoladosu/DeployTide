@@ -2,16 +2,14 @@ import {
 	createSshKey,
 	findSSHKeyById,
 	generateSSHKey,
+	recordOperatorAudit,
 	removeSSHKeyById,
 	updateSSHKeyById,
 } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
 import { TRPCError } from "@trpc/server";
 import { desc, eq } from "drizzle-orm";
-import {
-	createTRPCRouter,
-	operatorProcedure,
-} from "@/server/api/trpc";
+import { createTRPCRouter, operatorProcedure } from "@/server/api/trpc";
 import { audit } from "@/server/api/utils/audit";
 import {
 	apiCreateSshKey,
@@ -23,7 +21,28 @@ import {
 } from "@/server/db/schema";
 
 const protectedProcedure = operatorProcedure;
-const withPermission = (_resource: string, _action: string) => operatorProcedure;
+const withPermission = (_resource: string, _action: string) =>
+	operatorProcedure;
+
+const auditOperatorSshMutation = (
+	ctx: {
+		user: { id: string; email: string };
+		req: { headers: Record<string, string | string[] | undefined> };
+	},
+	action: string,
+	resourceId?: string,
+) =>
+	recordOperatorAudit({
+		actorUserId: ctx.user.id,
+		actorEmail: ctx.user.email,
+		action,
+		resourceType: "legacySshAdapter",
+		resourceId,
+		requestId:
+			typeof ctx.req.headers["x-request-id"] === "string"
+				? ctx.req.headers["x-request-id"]
+				: null,
+	});
 
 export const sshRouter = createTRPCRouter({
 	create: withPermission("sshKeys", "create")
@@ -39,6 +58,7 @@ export const sshRouter = createTRPCRouter({
 					resourceType: "sshKey",
 					resourceName: input.name,
 				});
+				await auditOperatorSshMutation(ctx, "create");
 			} catch (error) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",
@@ -65,7 +85,9 @@ export const sshRouter = createTRPCRouter({
 					resourceId: sshKey.sshKeyId,
 					resourceName: sshKey.name,
 				});
-				return await removeSSHKeyById(input.sshKeyId);
+				await removeSSHKeyById(input.sshKeyId);
+				await auditOperatorSshMutation(ctx, "delete", sshKey.sshKeyId);
+				return { sshKeyId: sshKey.sshKeyId, removed: true };
 			} catch (error) {
 				throw error;
 			}
@@ -81,10 +103,25 @@ export const sshRouter = createTRPCRouter({
 					message: "You are not allowed to access this SSH key",
 				});
 			}
-			return sshKey;
+			return {
+				sshKeyId: sshKey.sshKeyId,
+				name: sshKey.name,
+				description: sshKey.description,
+				publicKey: sshKey.publicKey,
+				createdAt: sshKey.createdAt,
+				lastUsedAt: sshKey.lastUsedAt,
+			};
 		}),
 	all: withPermission("sshKeys", "read").query(async ({ ctx }) => {
 		return await db.query.sshKeys.findMany({
+			columns: {
+				sshKeyId: true,
+				name: true,
+				description: true,
+				publicKey: true,
+				createdAt: true,
+				lastUsedAt: true,
+			},
 			where: eq(sshKeys.organizationId, ctx.session.activeOrganizationId),
 			orderBy: desc(sshKeys.createdAt),
 		});
@@ -101,8 +138,10 @@ export const sshRouter = createTRPCRouter({
 	}),
 	generate: withPermission("sshKeys", "read")
 		.input(apiGenerateSSHKey)
-		.mutation(async ({ input }) => {
-			return await generateSSHKey(input.type);
+		.mutation(async ({ input, ctx }) => {
+			const generated = await generateSSHKey(input.type);
+			await auditOperatorSshMutation(ctx, "generate");
+			return { publicKey: generated.publicKey, privateKey: "" };
 		}),
 	update: withPermission("sshKeys", "create")
 		.input(apiUpdateSshKey)
@@ -116,13 +155,27 @@ export const sshRouter = createTRPCRouter({
 					});
 				}
 				const result = await updateSSHKeyById(input);
+				if (!result) {
+					throw new TRPCError({
+						code: "NOT_FOUND",
+						message: "SSH key not found",
+					});
+				}
 				await audit(ctx, {
 					action: "update",
 					resourceType: "sshKey",
 					resourceId: sshKey.sshKeyId,
 					resourceName: sshKey.name,
 				});
-				return result;
+				await auditOperatorSshMutation(ctx, "update", sshKey.sshKeyId);
+				return {
+					sshKeyId: result.sshKeyId,
+					name: result.name,
+					description: result.description,
+					publicKey: result.publicKey,
+					createdAt: result.createdAt,
+					lastUsedAt: result.lastUsedAt,
+				};
 			} catch (error) {
 				throw new TRPCError({
 					code: "BAD_REQUEST",

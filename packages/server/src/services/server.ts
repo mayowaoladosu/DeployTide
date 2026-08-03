@@ -31,14 +31,16 @@ const defaultServerMetricsConfig: ServerMetricsConfig = {
 	},
 };
 
-export const createServer = async (
+const createServerRecord = async (
 	input: z.infer<typeof apiCreateServer>,
 	organizationId: string,
+	operatorOwned: boolean,
 ) => {
 	const newServer = await db
 		.insert(server)
 		.values({
 			...input,
+			operatorOwned,
 			organizationId: organizationId,
 			createdAt: new Date().toISOString(),
 			metricsConfig: defaultServerMetricsConfig,
@@ -56,9 +58,25 @@ export const createServer = async (
 	return newServer;
 };
 
+/** Creates a retained workspace server without silently adopting it as capacity. */
+export const createServer = (
+	input: z.infer<typeof apiCreateServer>,
+	organizationId: string,
+) => createServerRecord(input, organizationId, false);
+
+/** Explicit legacy compatibility path for operator-owned infrastructure. */
+export const createOperatorServer = (
+	input: z.infer<typeof apiCreateServer>,
+	organizationId: string,
+) => createServerRecord(input, organizationId, true);
+
 export const findServerById = async (serverId: string) => {
 	const currentServer = await db.query.server.findFirst({
-		where: and(eq(server.serverId, serverId), isNull(server.deletedAt)),
+		where: and(
+			eq(server.serverId, serverId),
+			eq(server.operatorOwned, false),
+			isNull(server.deletedAt),
+		),
 		with: {
 			deployments: true,
 			sshKey: true,
@@ -68,6 +86,27 @@ export const findServerById = async (serverId: string) => {
 		throw new TRPCError({
 			code: "NOT_FOUND",
 			message: "Server not found",
+		});
+	}
+	return currentServer;
+};
+
+export const findOperatorServerById = async (serverId: string) => {
+	const currentServer = await db.query.server.findFirst({
+		where: and(
+			eq(server.serverId, serverId),
+			eq(server.operatorOwned, true),
+			isNull(server.deletedAt),
+		),
+		with: {
+			deployments: true,
+			sshKey: true,
+		},
+	});
+	if (!currentServer) {
+		throw new TRPCError({
+			code: "NOT_FOUND",
+			message: "Operator server not found",
 		});
 	}
 	return currentServer;
@@ -193,6 +232,7 @@ export const getAccessibleServerIds = async (session: {
 	const allOrgServers = await db.query.server.findMany({
 		where: and(
 			eq(server.organizationId, activeOrganizationId),
+			eq(server.operatorOwned, false),
 			isNull(server.deletedAt),
 		),
 		columns: {
@@ -212,5 +252,12 @@ export const getAccessibleServerIds = async (session: {
 		return new Set(allOrgServers.map((s) => s.serverId));
 	}
 
-	return new Set(memberRecord?.accessedServers ?? []);
+	const visibleServerIds = new Set(
+		allOrgServers.map(({ serverId }) => serverId),
+	);
+	return new Set(
+		(memberRecord?.accessedServers ?? []).filter((serverId) =>
+			visibleServerIds.has(serverId),
+		),
+	);
 };

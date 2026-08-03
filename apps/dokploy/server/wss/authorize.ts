@@ -1,4 +1,5 @@
 import {
+	findServerById,
 	findWorkspaceServiceRuntime,
 	getAccessibleServerIds,
 	getContainersByAppNameMatch,
@@ -54,11 +55,13 @@ export const canAccessDockerOverWss = async (
 				session.activeOrganizationId,
 				serviceId,
 			);
-			if (
-				serverId &&
-				serverId !== "local" &&
-				serverId !== runtime.serverId
-			) {
+			if (runtime.serverId && runtime.serverId !== "local") {
+				// Service access remains authoritative for customer authorization.
+				// This lookup is only the independent operator-ownership boundary:
+				// `findServerById` rejects adopted operator-owned hosts.
+				await findServerById(runtime.serverId);
+			}
+			if (serverId && serverId !== "local" && serverId !== runtime.serverId) {
 				return false;
 			}
 			if (containerId) {
@@ -87,7 +90,9 @@ export const canAccessDockerOverWss = async (
 										),
 									])
 								).flat();
-				if (!containers.some((container) => container.containerId === containerId)) {
+				if (
+					!containers.some((container) => container.containerId === containerId)
+				) {
 					return false;
 				}
 			}

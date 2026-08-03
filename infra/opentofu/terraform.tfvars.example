@@ -1,0 +1,48 @@
+platform_name = "deploytide"
+
+regions = {
+  east-us = {
+    name                      = "East US"
+    provider_region           = "layerrail-east-us"
+    residency                 = "United States"
+    build_capacity            = 4
+    runtime_capacity          = 8
+    architecture              = "amd64"
+    runtime_cluster_id        = "replace-with-east-us-runtime-cluster-id"
+    runtime_target_id         = "replace-with-east-us-runtime-target-id"
+    controller_enrollment_url = "https://pki.internal.deploytide.example/v1/controller/enroll"
+  }
+  uk-south = {
+    name                      = "UK South"
+    provider_region           = "layerrail-uk-south"
+    residency                 = "United Kingdom"
+    build_capacity            = 0
+    runtime_capacity          = 8
+    architecture              = "amd64"
+    runtime_cluster_id        = "replace-with-uk-runtime-cluster-id"
+    runtime_target_id         = "replace-with-uk-runtime-target-id"
+    controller_enrollment_url = "https://pki.internal.deploytide.example/v1/controller/enroll"
+  }
+}
+
+# Supply these through a short-lived secret input channel. Every value must be
+# one-time use and expire before the provisioning operation can become stale.
+runtime_enrollment_tokens = {
+  east-us  = "replace_with_a_base64url_one_time_token_000000000000000000"
+  uk-south = "replace_with_a_base64url_one_time_token_111111111111111111"
+}
+
+controller_image = "ghcr.io/mayowaoladosu/deploytide-runtime-controller@sha256:replace-with-published-digest"
+docker_proxy_image = "ghcr.io/mayowaoladosu/deploytide-docker-proxy@sha256:replace-with-published-digest"
+control_plane_url = "https://operator.internal.deploytide.example"
+mtls_server_name = "operator.internal.deploytide.example"
+controller_ca_pem = <<-EOT
+-----BEGIN CERTIFICATE-----
+replace-with-operator-ca
+-----END CERTIFICATE-----
+EOT
+job_public_key_pem = <<-EOT
+-----BEGIN PUBLIC KEY-----
+replace-with-ed25519-public-key
+-----END PUBLIC KEY-----
+EOT

@@ -10,7 +10,7 @@
 // import { getServerAuthSession } from "@/server/auth";
 import { createHash, timingSafeEqual } from "node:crypto";
 import { db } from "@dokploy/server/db";
-import { organization } from "@dokploy/server/db/schema";
+import { organization, server } from "@dokploy/server/db/schema";
 import type { statements } from "@dokploy/server/lib/access-control";
 import { validateRequest } from "@dokploy/server/lib/auth";
 import { checkPermission } from "@dokploy/server/services/permission";
@@ -21,6 +21,7 @@ import type { Session, User } from "better-auth";
 import { and, eq, isNull } from "drizzle-orm";
 import superjson from "superjson";
 import { ZodError } from "zod";
+import { assertOperatorBrowserRequest } from "../operator-auth";
 
 type Resource = keyof typeof statements;
 type ActionOf<R extends Resource> = (typeof statements)[R][number];
@@ -204,10 +205,55 @@ export const assertOperatorRequest = (
  * Compatibility boundary for infrastructure routers retained until Phase 4.
  * A normal customer session is intentionally insufficient.
  */
-export const operatorProcedure = protectedProcedure.use(({ ctx, next }) => {
-	assertOperatorRequest(ctx.req);
-	return next();
-});
+export const operatorProcedure = protectedProcedure.use(
+	async ({ ctx, next, getRawInput }) => {
+		assertOperatorRequest(ctx.req);
+		const rawInput = await getRawInput();
+		if (
+			rawInput &&
+			typeof rawInput === "object" &&
+			"serverId" in rawInput &&
+			typeof rawInput.serverId === "string"
+		) {
+			await assertOperatorServer(rawInput.serverId);
+		}
+		return next();
+	},
+);
+
+export const assertOperatorServer = async (serverId: string) => {
+	const target = await db.query.server.findFirst({
+		where: and(
+			eq(server.serverId, serverId),
+			eq(server.operatorOwned, true),
+			isNull(server.deletedAt),
+		),
+		columns: { serverId: true },
+	});
+	if (!target) {
+		throw new TRPCError({
+			code: "NOT_FOUND",
+			message: "Operator server not found",
+		});
+	}
+	return target;
+};
+
+/**
+ * Browser-only global operator audience. A workspace role or customer API token
+ * is insufficient; callers also need a short-lived operator session cookie.
+ */
+export const superadminProcedure = protectedProcedure.use(
+	({ ctx, next, type }) => {
+		assertOperatorBrowserRequest({
+			req: ctx.req,
+			userId: ctx.user.id,
+			email: ctx.user.email,
+			type,
+		});
+		return next();
+	},
+);
 
 export const cliProcedure = t.procedure.use(({ ctx, next }) => {
 	if (

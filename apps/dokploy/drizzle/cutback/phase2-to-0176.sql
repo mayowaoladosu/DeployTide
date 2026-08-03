@@ -4,8 +4,8 @@
 
 DO $$
 BEGIN
-	IF (SELECT max(created_at) FROM drizzle.__drizzle_migrations) IS DISTINCT FROM 1785709133786::bigint THEN
-		RAISE EXCEPTION 'Compatibility cutback supports migration head 0184 only';
+	IF (SELECT max(created_at) FROM drizzle.__drizzle_migrations) IS DISTINCT FROM 1785723026320::bigint THEN
+		RAISE EXCEPTION 'Compatibility cutback supports migration head 0185 only';
 	END IF;
 	IF
 		EXISTS (SELECT 1 FROM "organization" WHERE "deleted_at" IS NOT NULL) OR
@@ -28,9 +28,45 @@ BEGIN
 		EXISTS (SELECT 1 FROM "build" WHERE status IN ('queued', 'running')) OR
 		EXISTS (SELECT 1 FROM "release" WHERE status IN ('queued', 'deploying', 'checking')) OR
 		EXISTS (SELECT 1 FROM "providerDelivery" WHERE status IN ('received', 'processing')) OR
-		EXISTS (SELECT 1 FROM "alias" WHERE status = 'pending')
+		EXISTS (SELECT 1 FROM "alias" WHERE status = 'pending') OR
+		EXISTS (SELECT 1 FROM "capacityLease" WHERE state IN ('active', 'releasing', 'reconciling')) OR
+		EXISTS (SELECT 1 FROM "operatorJobAttempt" WHERE status IN ('queued', 'acknowledged', 'running'))
 	THEN
-		RAISE EXCEPTION 'durable Phase 2 work must be drained before cutback';
+		RAISE EXCEPTION 'durable Phase 2/4 work must be drained before cutback';
+	END IF;
+	IF EXISTS (
+		SELECT 1 FROM "buildPool" WHERE "drainState" <> 'drained'
+	) THEN
+		RAISE EXCEPTION 'all Phase 4 build pools must be drained before cutback';
+	END IF;
+	IF EXISTS (
+		SELECT 1 FROM "runtimeCluster" WHERE "drainState" <> 'drained'
+	) THEN
+		RAISE EXCEPTION 'all Phase 4 runtime clusters must be drained before cutback';
+	END IF;
+	IF EXISTS (
+		SELECT 1 FROM "legacyInfrastructureInput" WHERE disposition = 'imported'
+	) THEN
+		RAISE EXCEPTION 'imported legacy infrastructure must be explicitly exported or rejected before cutback';
+	END IF;
+	IF EXISTS (
+		SELECT 1
+		FROM "legacyInfrastructureInput"
+		WHERE "exportPayload" #>> '{bootstrapAccess,status}' = 'retired'
+	) THEN
+		RAISE EXCEPTION 'retired legacy bootstrap access requires explicit restoration before cutback';
+	END IF;
+	IF EXISTS (
+		SELECT 1
+		FROM "release"
+		WHERE "runtimeTargetId" IS NOT NULL
+			OR "runtimePlacementId" IS NOT NULL
+			OR "previousRuntimeTargetId" IS NOT NULL
+			OR "previousRuntimePlacementId" IS NOT NULL
+			OR "runtimeRelocationState" IS NOT NULL
+			OR "runtimeRelocationId" IS NOT NULL
+	) THEN
+		RAISE EXCEPTION 'all Phase 4 release placement and relocation metadata must be cleared before cutback';
 	END IF;
 	IF NOT EXISTS (
 		SELECT 1
@@ -67,6 +103,18 @@ BEGIN
 	END IF;
 END;
 $$;--> statement-breakpoint
+DROP TABLE IF EXISTS "operatorJobAttempt" CASCADE;--> statement-breakpoint
+DROP TABLE IF EXISTS "capacityLease" CASCADE;--> statement-breakpoint
+DROP TABLE IF EXISTS "controllerCertificate" CASCADE;--> statement-breakpoint
+DROP TABLE IF EXISTS "infrastructureIncident" CASCADE;--> statement-breakpoint
+DROP TABLE IF EXISTS "legacyInfrastructureInput" CASCADE;--> statement-breakpoint
+DROP TABLE IF EXISTS "runtimeTarget" CASCADE;--> statement-breakpoint
+DROP TABLE IF EXISTS "runtimeCluster" CASCADE;--> statement-breakpoint
+DROP TABLE IF EXISTS "buildPool" CASCADE;--> statement-breakpoint
+DROP TABLE IF EXISTS "region" CASCADE;--> statement-breakpoint
+DROP TABLE IF EXISTS "infrastructureProvider" CASCADE;--> statement-breakpoint
+DROP TABLE IF EXISTS "projectPlacementPolicy" CASCADE;--> statement-breakpoint
+DROP TABLE IF EXISTS "operatorAuditLog" CASCADE;--> statement-breakpoint
 DROP FUNCTION IF EXISTS deploytide_guard_alias_target() CASCADE;--> statement-breakpoint
 DROP FUNCTION IF EXISTS deploytide_guard_release_retirement() CASCADE;--> statement-breakpoint
 DROP FUNCTION IF EXISTS deploytide_guard_release_provenance() CASCADE;--> statement-breakpoint
@@ -147,6 +195,7 @@ ALTER TABLE "redis" DROP COLUMN IF EXISTS "projectId" CASCADE;--> statement-brea
 ALTER TABLE "libsql" DROP COLUMN IF EXISTS "organizationId" CASCADE;--> statement-breakpoint
 ALTER TABLE "libsql" DROP COLUMN IF EXISTS "projectId" CASCADE;--> statement-breakpoint
 ALTER TABLE "server" DROP COLUMN IF EXISTS "deletedAt" CASCADE;--> statement-breakpoint
+ALTER TABLE "server" DROP COLUMN IF EXISTS "operatorOwned" CASCADE;--> statement-breakpoint
 
 ALTER TABLE "deployment" DROP COLUMN IF EXISTS "organizationId" CASCADE;--> statement-breakpoint
 ALTER TABLE "deployment" DROP COLUMN IF EXISTS "projectId" CASCADE;--> statement-breakpoint
@@ -202,6 +251,19 @@ DROP TYPE IF EXISTS "projectSourceProvider";--> statement-breakpoint
 DROP TYPE IF EXISTS "deliveryProvider";--> statement-breakpoint
 DROP TYPE IF EXISTS "providerDeliveryStatus";--> statement-breakpoint
 DROP TYPE IF EXISTS "releaseStatus";--> statement-breakpoint
+DROP TYPE IF EXISTS "capacityLeaseKind";--> statement-breakpoint
+DROP TYPE IF EXISTS "capacityLeaseState";--> statement-breakpoint
+DROP TYPE IF EXISTS "capacityReconciliationState";--> statement-breakpoint
+DROP TYPE IF EXISTS "controllerCertificateStatus";--> statement-breakpoint
+DROP TYPE IF EXISTS "infrastructureArchitecture";--> statement-breakpoint
+DROP TYPE IF EXISTS "infrastructureDrainState";--> statement-breakpoint
+DROP TYPE IF EXISTS "infrastructureHealth";--> statement-breakpoint
+DROP TYPE IF EXISTS "infrastructureIncidentSeverity";--> statement-breakpoint
+DROP TYPE IF EXISTS "infrastructureIncidentStatus";--> statement-breakpoint
+DROP TYPE IF EXISTS "infrastructureStatus";--> statement-breakpoint
+DROP TYPE IF EXISTS "legacyInfrastructureDisposition";--> statement-breakpoint
+DROP TYPE IF EXISTS "operatorJobKind";--> statement-breakpoint
+DROP TYPE IF EXISTS "operatorJobStatus";--> statement-breakpoint
 
 DELETE FROM drizzle.__drizzle_migrations
 WHERE created_at IN (
@@ -212,5 +274,6 @@ WHERE created_at IN (
 	1785687432136,
 	1785687811977,
 	1785689568547,
-	1785709133786
+	1785709133786,
+	1785723026320
 );--> statement-breakpoint

@@ -4,13 +4,14 @@ import {
 	containerRestart,
 	containerStart,
 	containerStop,
-	findServerById,
+	findOperatorServerById,
 	getConfig,
 	getContainers,
 	getContainersByAppLabel,
 	getContainersByAppNameMatch,
 	getServiceContainersByAppName,
 	getStackContainersByAppName,
+	recordOperatorAudit,
 	uploadFileToContainer,
 } from "@dokploy/server";
 import { TRPCError } from "@trpc/server";
@@ -21,6 +22,26 @@ import { createTRPCRouter, operatorProcedure } from "../trpc";
 
 export const containerIdRegex = /^[a-zA-Z0-9.\-_]+$/;
 
+const auditOperatorDockerMutation = (
+	ctx: {
+		user: { id: string; email: string };
+		req: { headers: Record<string, string | string[] | undefined> };
+	},
+	action: string,
+	resourceId: string,
+) =>
+	recordOperatorAudit({
+		actorUserId: ctx.user.id,
+		actorEmail: ctx.user.email,
+		action,
+		resourceType: "legacyDockerAdapter",
+		resourceId,
+		requestId:
+			typeof ctx.req.headers["x-request-id"] === "string"
+				? ctx.req.headers["x-request-id"]
+				: null,
+	});
+
 export const dockerRouter = createTRPCRouter({
 	getContainers: operatorProcedure
 		.input(
@@ -30,7 +51,7 @@ export const dockerRouter = createTRPCRouter({
 		)
 		.query(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session?.activeOrganizationId) {
 					throw new TRPCError({ code: "UNAUTHORIZED" });
 				}
@@ -50,7 +71,7 @@ export const dockerRouter = createTRPCRouter({
 		)
 		.mutation(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session?.activeOrganizationId) {
 					throw new TRPCError({ code: "UNAUTHORIZED" });
 				}
@@ -62,6 +83,7 @@ export const dockerRouter = createTRPCRouter({
 				resourceId: input.containerId,
 				resourceName: input.containerId,
 			});
+			await auditOperatorDockerMutation(ctx, "restart", input.containerId);
 		}),
 
 	startContainer: operatorProcedure
@@ -76,7 +98,7 @@ export const dockerRouter = createTRPCRouter({
 		)
 		.mutation(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session?.activeOrganizationId) {
 					throw new TRPCError({ code: "UNAUTHORIZED" });
 				}
@@ -88,6 +110,7 @@ export const dockerRouter = createTRPCRouter({
 				resourceId: input.containerId,
 				resourceName: input.containerId,
 			});
+			await auditOperatorDockerMutation(ctx, "start", input.containerId);
 		}),
 
 	stopContainer: operatorProcedure
@@ -102,7 +125,7 @@ export const dockerRouter = createTRPCRouter({
 		)
 		.mutation(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session?.activeOrganizationId) {
 					throw new TRPCError({ code: "UNAUTHORIZED" });
 				}
@@ -114,6 +137,7 @@ export const dockerRouter = createTRPCRouter({
 				resourceId: input.containerId,
 				resourceName: input.containerId,
 			});
+			await auditOperatorDockerMutation(ctx, "stop", input.containerId);
 		}),
 
 	killContainer: operatorProcedure
@@ -128,7 +152,7 @@ export const dockerRouter = createTRPCRouter({
 		)
 		.mutation(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session?.activeOrganizationId) {
 					throw new TRPCError({ code: "UNAUTHORIZED" });
 				}
@@ -140,6 +164,7 @@ export const dockerRouter = createTRPCRouter({
 				resourceId: input.containerId,
 				resourceName: input.containerId,
 			});
+			await auditOperatorDockerMutation(ctx, "kill", input.containerId);
 		}),
 
 	removeContainer: operatorProcedure
@@ -154,7 +179,7 @@ export const dockerRouter = createTRPCRouter({
 		)
 		.mutation(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session?.activeOrganizationId) {
 					throw new TRPCError({ code: "UNAUTHORIZED" });
 				}
@@ -166,6 +191,7 @@ export const dockerRouter = createTRPCRouter({
 				resourceId: input.containerId,
 				resourceName: input.containerId,
 			});
+			await auditOperatorDockerMutation(ctx, "delete", input.containerId);
 		}),
 
 	getConfig: operatorProcedure
@@ -180,7 +206,7 @@ export const dockerRouter = createTRPCRouter({
 		)
 		.query(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session?.activeOrganizationId) {
 					throw new TRPCError({ code: "UNAUTHORIZED" });
 				}
@@ -198,7 +224,7 @@ export const dockerRouter = createTRPCRouter({
 		)
 		.query(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session?.activeOrganizationId) {
 					throw new TRPCError({ code: "UNAUTHORIZED" });
 				}
@@ -220,7 +246,7 @@ export const dockerRouter = createTRPCRouter({
 		)
 		.query(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session?.activeOrganizationId) {
 					throw new TRPCError({ code: "UNAUTHORIZED" });
 				}
@@ -241,7 +267,7 @@ export const dockerRouter = createTRPCRouter({
 		)
 		.query(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session?.activeOrganizationId) {
 					throw new TRPCError({ code: "UNAUTHORIZED" });
 				}
@@ -258,7 +284,7 @@ export const dockerRouter = createTRPCRouter({
 		)
 		.query(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session?.activeOrganizationId) {
 					throw new TRPCError({ code: "UNAUTHORIZED" });
 				}
@@ -270,7 +296,7 @@ export const dockerRouter = createTRPCRouter({
 		.input(uploadFileToContainerSchema)
 		.mutation(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session?.activeOrganizationId) {
 					throw new TRPCError({ code: "UNAUTHORIZED" });
 				}
@@ -295,6 +321,7 @@ export const dockerRouter = createTRPCRouter({
 				input.destinationPath,
 				input.serverId || null,
 			);
+			await auditOperatorDockerMutation(ctx, "upload", input.containerId);
 
 			return { success: true, message: "File uploaded successfully" };
 		}),

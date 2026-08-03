@@ -2,8 +2,9 @@ import {
 	type DockerNode,
 	execAsync,
 	execAsyncRemote,
-	findServerById,
+	findOperatorServerById,
 	getRemoteDocker,
+	recordOperatorAudit,
 } from "@dokploy/server";
 import { TRPCError } from "@trpc/server";
 import { quote } from "shell-quote";
@@ -21,7 +22,7 @@ export const clusterRouter = createTRPCRouter({
 		)
 		.query(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const targetServer = await findServerById(input.serverId);
+				const targetServer = await findOperatorServerById(input.serverId);
 				if (targetServer.organizationId !== ctx.session.activeOrganizationId) {
 					throw new TRPCError({
 						code: "UNAUTHORIZED",
@@ -43,7 +44,7 @@ export const clusterRouter = createTRPCRouter({
 		)
 		.mutation(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const targetServer = await findServerById(input.serverId);
+				const targetServer = await findOperatorServerById(input.serverId);
 				if (targetServer.organizationId !== ctx.session.activeOrganizationId) {
 					throw new TRPCError({
 						code: "UNAUTHORIZED",
@@ -68,6 +69,17 @@ export const clusterRouter = createTRPCRouter({
 					resourceId: input.nodeId,
 					resourceName: input.nodeId,
 				});
+				await recordOperatorAudit({
+					actorUserId: ctx.user.id,
+					actorEmail: ctx.user.email,
+					action: "remove-worker",
+					resourceType: "legacyClusterAdapter",
+					resourceId: input.nodeId,
+					requestId:
+						typeof ctx.req.headers["x-request-id"] === "string"
+							? ctx.req.headers["x-request-id"]
+							: null,
+				});
 				return true;
 			} catch (error) {
 				throw new TRPCError({
@@ -86,7 +98,7 @@ export const clusterRouter = createTRPCRouter({
 		)
 		.query(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const targetServer = await findServerById(input.serverId);
+				const targetServer = await findOperatorServerById(input.serverId);
 				if (targetServer.organizationId !== ctx.session.activeOrganizationId) {
 					throw new TRPCError({
 						code: "UNAUTHORIZED",
@@ -102,7 +114,7 @@ export const clusterRouter = createTRPCRouter({
 			const swarmNodeAddr = info?.Swarm?.NodeAddr;
 			let ip = swarmNodeAddr || (await getLocalServerIp());
 			if (!swarmNodeAddr && input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				ip = server?.ipAddress;
 			}
 
@@ -120,7 +132,7 @@ export const clusterRouter = createTRPCRouter({
 		)
 		.query(async ({ input, ctx }) => {
 			if (input.serverId) {
-				const targetServer = await findServerById(input.serverId);
+				const targetServer = await findOperatorServerById(input.serverId);
 				if (targetServer.organizationId !== ctx.session.activeOrganizationId) {
 					throw new TRPCError({
 						code: "UNAUTHORIZED",
@@ -136,7 +148,7 @@ export const clusterRouter = createTRPCRouter({
 			const swarmNodeAddr = info?.Swarm?.NodeAddr;
 			let ip = swarmNodeAddr || (await getLocalServerIp());
 			if (!swarmNodeAddr && input.serverId) {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				ip = server?.ipAddress;
 			}
 			return {

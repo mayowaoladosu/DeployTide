@@ -59,7 +59,12 @@ describe("canonical delivery state machines", () => {
 	it("allows ready releases to retire but never redeploy in place", () => {
 		assertStateTransition("release", releaseTransitions, "ready", "retired");
 		expect(() =>
-			assertStateTransition("release", releaseTransitions, "ready", "deploying"),
+			assertStateTransition(
+				"release",
+				releaseTransitions,
+				"ready",
+				"deploying",
+			),
 		).toThrow();
 	});
 
@@ -79,8 +84,24 @@ describe("canonical delivery state machines", () => {
 	});
 
 	it("keeps completed operations immutable", () => {
-		assertStateTransition("operation", operationTransitions, "pending", "running");
-		assertStateTransition("operation", operationTransitions, "running", "succeeded");
+		assertStateTransition(
+			"operation",
+			operationTransitions,
+			"pending",
+			"running",
+		);
+		assertStateTransition(
+			"operation",
+			operationTransitions,
+			"running",
+			"pending",
+		);
+		assertStateTransition(
+			"operation",
+			operationTransitions,
+			"running",
+			"succeeded",
+		);
 		expect(() =>
 			assertStateTransition(
 				"operation",

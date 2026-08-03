@@ -137,6 +137,7 @@ export interface TransitionReleaseInput {
 	releaseId: string;
 	expectedStatus: ReleaseState;
 	nextStatus: ReleaseState;
+	runtimeTargetId?: string | null;
 	runtimePlacementId?: string | null;
 	healthResult?: Record<string, unknown> | null;
 	failureCode?: string | null;
@@ -172,6 +173,7 @@ export const transitionRelease = async (
 		.update(releases)
 		.set({
 			status: input.nextStatus,
+			runtimeTargetId: input.runtimeTargetId,
 			runtimePlacementId: input.runtimePlacementId,
 			healthResult: input.healthResult,
 			failureCode: input.failureCode,

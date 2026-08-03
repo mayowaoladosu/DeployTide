@@ -1,0 +1,62 @@
+#cloud-config
+package_update: true
+packages:
+  - ca-certificates
+  - docker.io
+  - fuse-overlayfs
+  - slirp4netns
+  - uidmap
+write_files:
+  - path: /etc/deploytide/build-worker-contract.json
+    encoding: b64
+    permissions: "0644"
+    owner: root:root
+    content: "${build_host_contract_b64}"
+  - path: /etc/sysctl.d/99-deploytide-build-worker.conf
+    permissions: "0644"
+    owner: root:root
+    content: |
+      user.max_user_namespaces = 28633
+  - path: /usr/local/sbin/deploytide-verify-build-host
+    permissions: "0755"
+    owner: root:root
+    content: |
+      #!/bin/sh
+      set -eu
+      test "$(sysctl -n user.max_user_namespaces)" -gt 0
+      if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+        sysctl -w kernel.apparmor_restrict_unprivileged_userns=0 >/dev/null
+        test "$(sysctl -n kernel.apparmor_restrict_unprivileged_userns)" = "0"
+      fi
+      /usr/bin/docker info >/dev/null
+      /usr/bin/docker pull ${buildkit_image}
+      /usr/bin/docker image inspect ${buildkit_image} >/dev/null
+      install -d -m 0700 -o root -g root /var/lib/deploytide/build-worker
+      date -u +%Y-%m-%dT%H:%M:%SZ > /var/lib/deploytide/build-worker/host-ready-at
+  - path: /etc/systemd/system/deploytide-build-worker-host.service
+    permissions: "0644"
+    owner: root:root
+    content: |
+      [Unit]
+      Description=Verify DeployTide RootlessBuildKitProvider host contract
+      Requires=docker.service
+      After=docker.service network-online.target
+
+      [Service]
+      Type=oneshot
+      ExecStart=/usr/local/sbin/deploytide-verify-build-host
+      RemainAfterExit=yes
+      NoNewPrivileges=yes
+      PrivateDevices=yes
+      PrivateTmp=yes
+      ProtectHome=yes
+      ProtectSystem=strict
+      ReadWritePaths=/var/lib/deploytide/build-worker -/proc/sys/kernel/apparmor_restrict_unprivileged_userns
+      RestrictAddressFamilies=AF_UNIX
+
+      [Install]
+      WantedBy=multi-user.target
+runcmd:
+  - [sysctl, --system]
+  - [systemctl, daemon-reload]
+  - [systemctl, enable, --now, deploytide-build-worker-host.service]

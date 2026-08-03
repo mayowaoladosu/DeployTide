@@ -12,6 +12,7 @@ node_modules
 .env.development.local
 .env.test.local
 .env.production.local
+.env.production
 
 openapi.json
 
@@ -47,3 +48,9 @@ yarn-error.log*
 
 .playwright-*
 .credentials
+
+# Operator infrastructure state and rendered cloud-init
+infra/opentofu/.terraform/
+infra/opentofu/generated/
+infra/opentofu/*.tfstate*
+infra/opentofu/*.tfplan

@@ -11,7 +11,7 @@ import type { ReactElement, ReactNode } from "react";
 import { SearchCommand } from "@/components/dashboard/search-command";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
-import { api } from "@/utils/api";
+import { api, operatorApi } from "@/utils/api";
 
 const manrope = Manrope({ subsets: ["latin"], variable: "--font-dt-sans" });
 const newsreader = Newsreader({
@@ -37,27 +37,27 @@ const MyApp = ({
 	return (
 		<>
 			<div className={`${manrope.variable} ${newsreader.variable}`}>
-			<Head>
-				<title>{BRAND.name}</title>
-				<meta name="description" content={BRAND.description} />
-			</Head>
-			<TooltipProvider>
-				<ThemeProvider
-					attribute="class"
-					defaultTheme="system"
-					enableSystem
-					disableTransitionOnChange
-					forcedTheme={Component.theme}
-				>
-					<NextTopLoader color="hsl(var(--sidebar-ring))" />
-					<Toaster richColors />
-					<SearchCommand />
-					{getLayout(<Component {...pageProps} />)}
-				</ThemeProvider>
-			</TooltipProvider>
+				<Head>
+					<title>{BRAND.name}</title>
+					<meta name="description" content={BRAND.description} />
+				</Head>
+				<TooltipProvider>
+					<ThemeProvider
+						attribute="class"
+						defaultTheme="system"
+						enableSystem
+						disableTransitionOnChange
+						forcedTheme={Component.theme}
+					>
+						<NextTopLoader color="hsl(var(--sidebar-ring))" />
+						<Toaster richColors />
+						<SearchCommand />
+						{getLayout(<Component {...pageProps} />)}
+					</ThemeProvider>
+				</TooltipProvider>
 			</div>
 		</>
 	);
 };
 
-export default api.withTRPC(MyApp);
+export default api.withTRPC(operatorApi.withTRPC(MyApp));

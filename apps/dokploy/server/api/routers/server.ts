@@ -1,14 +1,15 @@
 import {
-	createServer,
+	createOperatorServer,
 	defaultCommand,
 	deleteServer,
-	findServerById,
+	findOperatorServerById,
 	findServersByUserId,
 	findUserById,
 	getAccessibleServerIds,
 	getPublicIpWithFallback,
 	haveActiveServices,
 	IS_CLOUD,
+	recordOperatorAudit,
 	redactServerSshKey,
 	removeDeploymentsByServerId,
 	serverAudit,
@@ -30,10 +31,7 @@ import {
 	sql,
 } from "drizzle-orm";
 import { z } from "zod";
-import {
-	createTRPCRouter,
-	operatorProcedure,
-} from "@/server/api/trpc";
+import { createTRPCRouter, operatorProcedure } from "@/server/api/trpc";
 import { audit } from "@/server/api/utils/audit";
 import {
 	apiCreateServer,
@@ -54,6 +52,26 @@ import {
 } from "@/server/db/schema";
 import { applyDockerCleanupSchedule } from "@/server/utils/docker-cleanup";
 
+const auditOperatorServerMutation = (
+	ctx: {
+		user: { id: string; email: string };
+		req: { headers: Record<string, string | string[] | undefined> };
+	},
+	action: string,
+	resourceId: string,
+) =>
+	recordOperatorAudit({
+		actorUserId: ctx.user.id,
+		actorEmail: ctx.user.email,
+		action,
+		resourceType: "legacyServerAdapter",
+		resourceId,
+		requestId:
+			typeof ctx.req.headers["x-request-id"] === "string"
+				? ctx.req.headers["x-request-id"]
+				: null,
+	});
+
 export const serverRouter = createTRPCRouter({
 	create: operatorProcedure
 		.input(apiCreateServer)
@@ -67,7 +85,7 @@ export const serverRouter = createTRPCRouter({
 						message: "You cannot create more servers",
 					});
 				}
-				const project = await createServer(
+				const project = await createOperatorServer(
 					input,
 					ctx.session.activeOrganizationId,
 				);
@@ -82,6 +100,7 @@ export const serverRouter = createTRPCRouter({
 					resourceId: project.serverId,
 					resourceName: project.name,
 				});
+				await auditOperatorServerMutation(ctx, "create", project.serverId);
 				return project;
 			} catch (error) {
 				throw new TRPCError({
@@ -95,7 +114,7 @@ export const serverRouter = createTRPCRouter({
 	one: operatorProcedure
 		.input(apiFindOneServer)
 		.query(async ({ input, ctx }) => {
-			const server = await findServerById(input.serverId);
+			const server = await findOperatorServerById(input.serverId);
 			if (server.organizationId !== ctx.session.activeOrganizationId) {
 				throw new TRPCError({
 					code: "UNAUTHORIZED",
@@ -116,7 +135,7 @@ export const serverRouter = createTRPCRouter({
 	getDefaultCommand: operatorProcedure
 		.input(apiFindOneServer)
 		.query(async ({ input }) => {
-			const server = await findServerById(input.serverId);
+			const server = await findOperatorServerById(input.serverId);
 			const isBuildServer = server.serverType === "build";
 			return defaultCommand(isBuildServer);
 		}),
@@ -139,6 +158,7 @@ export const serverRouter = createTRPCRouter({
 			.where(
 				and(
 					eq(server.organizationId, ctx.session.activeOrganizationId),
+					eq(server.operatorOwned, true),
 					isNull(server.deletedAt),
 				),
 			)
@@ -148,25 +168,28 @@ export const serverRouter = createTRPCRouter({
 		return result.filter((s) => accessibleIds.has(s.serverId));
 	}),
 	allForPermissions: operatorProcedure.query(async ({ ctx }) => {
-			return await db.query.server.findMany({
-				columns: {
-					serverId: true,
-					name: true,
-					ipAddress: true,
-					serverType: true,
-				},
-				orderBy: desc(server.createdAt),
-				where: and(
-					eq(server.organizationId, ctx.session.activeOrganizationId),
-					isNull(server.deletedAt),
-				),
-			});
-		}),
+		return await db.query.server.findMany({
+			columns: {
+				serverId: true,
+				name: true,
+				ipAddress: true,
+				serverType: true,
+			},
+			orderBy: desc(server.createdAt),
+			where: and(
+				eq(server.organizationId, ctx.session.activeOrganizationId),
+				eq(server.operatorOwned, true),
+				isNull(server.deletedAt),
+			),
+		});
+	}),
 	count: operatorProcedure.query(async ({ ctx }) => {
 		const organizations = await db.query.organization.findMany({
 			where: eq(organization.ownerId, ctx.user.id),
 			with: {
-				servers: { where: isNull(server.deletedAt) },
+				servers: {
+					where: and(eq(server.operatorOwned, true), isNull(server.deletedAt)),
+				},
 			},
 		});
 
@@ -183,6 +206,7 @@ export const serverRouter = createTRPCRouter({
 				? and(
 						isNotNull(server.sshKeyId),
 						eq(server.organizationId, ctx.session.activeOrganizationId),
+						eq(server.operatorOwned, true),
 						eq(server.serverStatus, "active"),
 						eq(server.serverType, "deploy"),
 						isNull(server.deletedAt),
@@ -190,6 +214,7 @@ export const serverRouter = createTRPCRouter({
 				: and(
 						isNotNull(server.sshKeyId),
 						eq(server.organizationId, ctx.session.activeOrganizationId),
+						eq(server.operatorOwned, true),
 						eq(server.serverType, "deploy"),
 						isNull(server.deletedAt),
 					),
@@ -205,6 +230,7 @@ export const serverRouter = createTRPCRouter({
 				? and(
 						isNotNull(server.sshKeyId),
 						eq(server.organizationId, ctx.session.activeOrganizationId),
+						eq(server.operatorOwned, true),
 						eq(server.serverStatus, "active"),
 						eq(server.serverType, "build"),
 						isNull(server.deletedAt),
@@ -212,6 +238,7 @@ export const serverRouter = createTRPCRouter({
 				: and(
 						isNotNull(server.sshKeyId),
 						eq(server.organizationId, ctx.session.activeOrganizationId),
+						eq(server.operatorOwned, true),
 						eq(server.serverType, "build"),
 						isNull(server.deletedAt),
 					),
@@ -222,7 +249,7 @@ export const serverRouter = createTRPCRouter({
 		.input(apiFindOneServer)
 		.mutation(async ({ input, ctx }) => {
 			try {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session.activeOrganizationId) {
 					throw new TRPCError({
 						code: "UNAUTHORIZED",
@@ -236,6 +263,7 @@ export const serverRouter = createTRPCRouter({
 					resourceId: input.serverId,
 					resourceName: server.name,
 				});
+				await auditOperatorServerMutation(ctx, "setup", input.serverId);
 				return currentServer;
 			} catch (error) {
 				throw error;
@@ -253,13 +281,14 @@ export const serverRouter = createTRPCRouter({
 		.input(apiFindOneServer)
 		.subscription(async ({ input, ctx }) => {
 			try {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session.activeOrganizationId) {
 					throw new TRPCError({
 						code: "UNAUTHORIZED",
 						message: "You are not authorized to setup this server",
 					});
 				}
+				await auditOperatorServerMutation(ctx, "setup-stream", input.serverId);
 				return observable<string>((emit) => {
 					serverSetup(input.serverId, (log) => {
 						emit.next(log);
@@ -273,7 +302,7 @@ export const serverRouter = createTRPCRouter({
 		.input(apiFindOneServer)
 		.query(async ({ input, ctx }) => {
 			try {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session.activeOrganizationId) {
 					throw new TRPCError({
 						code: "UNAUTHORIZED",
@@ -321,7 +350,7 @@ export const serverRouter = createTRPCRouter({
 		.input(apiFindOneServer)
 		.query(async ({ input, ctx }) => {
 			try {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session.activeOrganizationId) {
 					throw new TRPCError({
 						code: "UNAUTHORIZED",
@@ -371,7 +400,7 @@ export const serverRouter = createTRPCRouter({
 		.input(apiUpdateServerMonitoring)
 		.mutation(async ({ input, ctx }) => {
 			try {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session.activeOrganizationId) {
 					throw new TRPCError({
 						code: "UNAUTHORIZED",
@@ -410,6 +439,7 @@ export const serverRouter = createTRPCRouter({
 					resourceId: input.serverId,
 					resourceName: server.name,
 				});
+				await auditOperatorServerMutation(ctx, "monitor", input.serverId);
 				return currentServer;
 			} catch (error) {
 				throw error;
@@ -419,7 +449,7 @@ export const serverRouter = createTRPCRouter({
 		.input(apiRemoveServer)
 		.mutation(async ({ input, ctx }) => {
 			try {
-				const currentServer = await findServerById(input.serverId);
+				const currentServer = await findOperatorServerById(input.serverId);
 				if (currentServer.organizationId !== ctx.session.activeOrganizationId) {
 					throw new TRPCError({
 						code: "UNAUTHORIZED",
@@ -443,6 +473,7 @@ export const serverRouter = createTRPCRouter({
 				});
 				await removeDeploymentsByServerId(currentServer);
 				await deleteServer(input.serverId);
+				await auditOperatorServerMutation(ctx, "delete", input.serverId);
 
 				return redactServerSshKey(currentServer);
 			} catch (error) {
@@ -453,7 +484,7 @@ export const serverRouter = createTRPCRouter({
 		.input(apiUpdateServer)
 		.mutation(async ({ input, ctx }) => {
 			try {
-				const server = await findServerById(input.serverId);
+				const server = await findOperatorServerById(input.serverId);
 				if (server.organizationId !== ctx.session.activeOrganizationId) {
 					throw new TRPCError({
 						code: "UNAUTHORIZED",
@@ -483,6 +514,7 @@ export const serverRouter = createTRPCRouter({
 					resourceId: input.serverId,
 					resourceName: server.name,
 				});
+				await auditOperatorServerMutation(ctx, "update", input.serverId);
 				return currentServer;
 			} catch (error) {
 				throw error;
@@ -491,16 +523,22 @@ export const serverRouter = createTRPCRouter({
 	updateBuildsConcurrency: operatorProcedure
 		.input(apiUpdateServerBuildsConcurrency)
 		.mutation(async ({ input, ctx }) => {
-			const currentServer = await findServerById(input.serverId);
+			const currentServer = await findOperatorServerById(input.serverId);
 			if (currentServer.organizationId !== ctx.session.activeOrganizationId) {
 				throw new TRPCError({
 					code: "UNAUTHORIZED",
 					message: "You are not authorized to update this server",
 				});
 			}
-			return await updateServerById(input.serverId, {
+			const updated = await updateServerById(input.serverId, {
 				buildsConcurrency: input.buildsConcurrency,
 			});
+			await auditOperatorServerMutation(
+				ctx,
+				"update-concurrency",
+				input.serverId,
+			);
+			return updated;
 		}),
 	publicIp: operatorProcedure.query(async () => {
 		if (IS_CLOUD) {

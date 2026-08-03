@@ -11,10 +11,12 @@ vi.mock("@dokploy/server/services/permission", () => ({
 }));
 
 const mockGetAccessibleServerIds = vi.hoisted(() => vi.fn());
+const mockFindServerById = vi.hoisted(() => vi.fn());
 const mockFindWorkspaceServiceRuntime = vi.hoisted(() => vi.fn());
 const mockGetContainersByAppNameMatch = vi.hoisted(() => vi.fn());
 const mockGetServiceContainersByAppName = vi.hoisted(() => vi.fn());
 vi.mock("@dokploy/server", () => ({
+	findServerById: mockFindServerById,
 	getAccessibleServerIds: mockGetAccessibleServerIds,
 	findWorkspaceServiceRuntime: mockFindWorkspaceServiceRuntime,
 	getContainersByAppNameMatch: mockGetContainersByAppNameMatch,
@@ -31,6 +33,10 @@ const SESSION = { activeOrganizationId: "org-1" };
 
 beforeEach(() => {
 	vi.clearAllMocks();
+	mockFindServerById.mockResolvedValue({
+		serverId: "srv-remote",
+		operatorOwned: false,
+	});
 	mockFindWorkspaceServiceRuntime.mockResolvedValue({
 		serviceId: "svc-1",
 		appName: "app-owned",
@@ -100,6 +106,23 @@ describe("canAccessDockerOverWss", () => {
 		// Service path is authoritative — it must not fall through to docker/server.
 		expect(mockHasPermission).not.toHaveBeenCalled();
 		expect(mockGetAccessibleServerIds).not.toHaveBeenCalled();
+		expect(mockFindServerById).toHaveBeenCalledWith("srv-remote");
+	});
+
+	it("rejects a service WebSocket on an operator-owned runtime host", async () => {
+		mockCheckServiceAccess.mockResolvedValue(undefined);
+		mockFindWorkspaceServiceRuntime.mockResolvedValue({
+			serviceId: "svc-1",
+			appName: "app-owned",
+			serverId: "srv-operator",
+			type: "application",
+		});
+		mockFindServerById.mockRejectedValue(
+			new Error("Operator server not found"),
+		);
+		expect(
+			await canAccessDockerOverWss(USER, SESSION, "srv-operator", "svc-1"),
+		).toBe(false);
 	});
 
 	it("blocks generic Docker access in managed mode", async () => {

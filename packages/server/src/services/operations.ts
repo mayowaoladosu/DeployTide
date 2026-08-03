@@ -1,7 +1,7 @@
 import { db } from "@dokploy/server/db";
 import { type operationActorType, operations } from "@dokploy/server/db/schema";
 import { TRPCError } from "@trpc/server";
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gt, isNull, sql } from "drizzle-orm";
 import {
 	assertStateTransition,
 	type OperationState,
@@ -82,8 +82,6 @@ export interface TransitionOperationInput {
 	result?: Record<string, unknown> | null;
 	errorCode?: string | null;
 	errorMessage?: string | null;
-	leaseOwner?: string | null;
-	leaseExpiresAt?: Date | null;
 }
 
 export const transitionOperation = async (
@@ -106,8 +104,6 @@ export const transitionOperation = async (
 			result: input.result,
 			errorCode: input.errorCode,
 			errorMessage: input.errorMessage,
-			leaseOwner: input.leaseOwner,
-			leaseExpiresAt: input.leaseExpiresAt,
 			attempts:
 				input.nextStatus === "running"
 					? sql`${operations.attempts} + 1`
@@ -120,6 +116,12 @@ export const transitionOperation = async (
 				eq(operations.operationId, input.operationId),
 				eq(operations.organizationId, input.organizationId),
 				eq(operations.status, input.expectedStatus),
+				input.expectedStatus === "running"
+					? and(
+							isNull(operations.leaseOwner),
+							isNull(operations.leaseExpiresAt),
+						)
+					: undefined,
 			),
 		)
 		.returning();
@@ -137,5 +139,106 @@ export const transitionOperation = async (
 	throw new TRPCError({
 		code: "CONFLICT",
 		message: "Operation changed while its state transition was in progress",
+	});
+};
+
+export interface TransitionFencedOperationInput
+	extends Omit<TransitionOperationInput, "expectedStatus"> {
+	expectedStatus: "running";
+	leaseOwner: string;
+	fencingToken: number;
+	capacityLeaseId?: string;
+	capacityFencingToken?: number;
+	now?: Date;
+}
+
+/**
+ * Completes a scheduler-owned operation only while the exact worker claim is
+ * still live. Ordinary transitions intentionally cannot mutate claimed work.
+ */
+export const transitionFencedOperation = async (
+	input: TransitionFencedOperationInput,
+	transaction: DatabaseTransaction | typeof db = db,
+) => {
+	assertStateTransition(
+		"operation",
+		operationTransitions,
+		input.expectedStatus,
+		input.nextStatus,
+	);
+	const hasCapacityIdentity = input.capacityLeaseId !== undefined;
+	if (
+		!input.leaseOwner ||
+		!Number.isSafeInteger(input.fencingToken) ||
+		hasCapacityIdentity !== (input.capacityFencingToken !== undefined) ||
+		(input.capacityFencingToken !== undefined &&
+			(!Number.isSafeInteger(input.capacityFencingToken) ||
+				input.capacityFencingToken < 1))
+	) {
+		throw new TRPCError({
+			code: "BAD_REQUEST",
+			message: "Operation fencing identity is invalid",
+		});
+	}
+	const now = input.now ?? new Date();
+	const terminal = ["succeeded", "failed", "cancelled"].includes(
+		input.nextStatus,
+	);
+	const capacityFence = hasCapacityIdentity
+		? sql`exists (
+			select 1
+			from "capacityLease" capacity
+			where capacity."capacityLeaseId" = ${input.capacityLeaseId}
+				and capacity."operationId" = ${operations.operationId}
+				and capacity."organizationId" = ${operations.organizationId}
+				and capacity."leaseOwner" = ${input.leaseOwner}
+				and capacity."fencingToken" = ${input.capacityFencingToken}
+				and capacity.state = 'active'
+				and capacity."expiresAt" > ${now.toISOString()}::timestamptz
+		)`
+		: sql`not exists (
+			select 1
+			from "capacityLease" capacity
+			where capacity."operationId" = ${operations.operationId}
+				and capacity."organizationId" = ${operations.organizationId}
+		)`;
+	const [updated] = await transaction
+		.update(operations)
+		.set({
+			status: input.nextStatus,
+			result: input.result,
+			errorCode: input.errorCode,
+			errorMessage: input.errorMessage,
+			leaseOwner: terminal ? null : input.leaseOwner,
+			leaseExpiresAt: terminal ? null : undefined,
+			updatedAt: now,
+			completedAt: terminal ? now : null,
+		})
+		.where(
+			and(
+				eq(operations.operationId, input.operationId),
+				eq(operations.organizationId, input.organizationId),
+				eq(operations.status, input.expectedStatus),
+				eq(operations.leaseOwner, input.leaseOwner),
+				eq(operations.fencingToken, input.fencingToken),
+				gt(operations.leaseExpiresAt, now),
+				capacityFence,
+			),
+		)
+		.returning();
+	if (updated) return updated;
+
+	const current = await transaction.query.operations.findFirst({
+		where: and(
+			eq(operations.operationId, input.operationId),
+			eq(operations.organizationId, input.organizationId),
+		),
+	});
+	if (!current) {
+		throw new TRPCError({ code: "NOT_FOUND", message: "Operation not found" });
+	}
+	throw new TRPCError({
+		code: "CONFLICT",
+		message: "Operation claim is stale, expired, or owned by another worker",
 	});
 };

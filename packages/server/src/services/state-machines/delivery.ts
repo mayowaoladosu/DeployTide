@@ -30,7 +30,7 @@ export const releaseTransitions = {
 
 export const operationTransitions = {
 	pending: ["running", "cancelled"],
-	running: ["succeeded", "failed", "cancelled"],
+	running: ["pending", "succeeded", "failed", "cancelled"],
 	succeeded: [],
 	failed: [],
 	cancelled: [],

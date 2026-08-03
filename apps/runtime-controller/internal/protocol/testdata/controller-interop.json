@@ -1,0 +1,32 @@
+{
+	"description": "TypeScript-produced fixed Ed25519 controller protocol vector",
+	"privateKeyPem": "-----BEGIN PRIVATE KEY-----\nMC4CAQAwBQYDK2VwBCIEIJ1hsZ3v/VpguoRK9JLsLMREScVpezJpGXA7rAMcrn9g\n-----END PRIVATE KEY-----\n",
+	"publicKeyPem": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA11qYAYKxCrfVS/7TyWQHOg7hcvPapiMlrwIaaPcHURo=\n-----END PUBLIC KEY-----\n",
+	"payloadObject": {
+		"releaseId": "release-interop",
+		"imageReference": "registry.example/deploytide/interop:fixed",
+		"imageDigest": "sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"environment": {
+			"Z_LAST": "fish&chips <ok>",
+			"A_FIRST": "雪 & <東京>"
+		},
+		"containerPort": 8080,
+		"cpuMillis": 375,
+		"memoryMb": 768
+	},
+	"payloadJson": "{\"containerPort\":8080,\"cpuMillis\":375,\"environment\":{\"A_FIRST\":\"雪 & <東京>\",\"Z_LAST\":\"fish&chips <ok>\"},\"imageDigest\":\"sha256:0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\",\"imageReference\":\"registry.example/deploytide/interop:fixed\",\"memoryMb\":768,\"releaseId\":\"release-interop\"}",
+	"envelope": {
+		"version": "deploytide.runtime-controller.v1",
+		"attemptId": "attempt-interop-001",
+		"clusterId": "cluster-interop",
+		"sequence": 4242,
+		"fencingToken": 99,
+		"resourceKey": "release:release-interop",
+		"kind": "release_create",
+		"issuedAt": "2026-08-03T00:00:00.000Z",
+		"expiresAt": "2026-08-03T00:01:00.000Z",
+		"payload": "eyJjb250YWluZXJQb3J0Ijo4MDgwLCJjcHVNaWxsaXMiOjM3NSwiZW52aXJvbm1lbnQiOnsiQV9GSVJTVCI6IumbqiAmIDzmnbHkuqw-IiwiWl9MQVNUIjoiZmlzaCZjaGlwcyA8b2s-In0sImltYWdlRGlnZXN0Ijoic2hhMjU2OjAxMjM0NTY3ODlhYmNkZWYwMTIzNDU2Nzg5YWJjZGVmMDEyMzQ1Njc4OWFiY2RlZjAxMjM0NTY3ODlhYmNkZWYiLCJpbWFnZVJlZmVyZW5jZSI6InJlZ2lzdHJ5LmV4YW1wbGUvZGVwbG95dGlkZS9pbnRlcm9wOmZpeGVkIiwibWVtb3J5TWIiOjc2OCwicmVsZWFzZUlkIjoicmVsZWFzZS1pbnRlcm9wIn0",
+		"signature": "8VDIRiGWaZSTy1hULg1siYe2BFsUwNBHRfPiL_mEH_e1y-i15CzzMQ0VjGjG0ogLPeiSFpvXuik9GoeUV_cBAQ"
+	},
+	"signingInputBase64url": "ZGVwbG95dGlkZS5ydW50aW1lLWNvbnRyb2xsZXIudjEKYXR0ZW1wdC1pbnRlcm9wLTAwMQpjbHVzdGVyLWludGVyb3AKNDI0Mgo5OQpyZWxlYXNlOnJlbGVhc2UtaW50ZXJvcApyZWxlYXNlX2NyZWF0ZQoyMDI2LTA4LTAzVDAwOjAwOjAwLjAwMFoKMjAyNi0wOC0wM1QwMDowMTowMC4wMDBaCmU5ZTM4MjU0NGNkZmU1OWVhZDM3N2JlODRkZjhhMzI0YTBkZWJjNmMxYWMzZWM4Nzk3OWRmNDliMjk4OWRhNWE"
+}

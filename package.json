@@ -21,6 +21,7 @@
 		"check:license-boundaries": "node scripts/check-license-boundaries.mjs",
 		"check:product-boundaries": "node scripts/check-product-boundaries.mjs",
 		"check:product-shell": "node scripts/check-product-shell.mjs",
+		"check:infrastructure-boundaries": "node scripts/check-infrastructure-boundaries.mjs",
 		"check": "biome check --write --no-errors-on-unmatched --files-ignore-unknown=true",
 		"format-and-lint:fix": "biome check . --write"
 	},

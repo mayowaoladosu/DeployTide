@@ -1,5 +1,6 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
+	check,
 	foreignKey,
 	index,
 	integer,
@@ -18,6 +19,7 @@ import { deployments } from "./deployment";
 import { environments } from "./environment";
 import { operations } from "./operation";
 import { projects } from "./project";
+import { runtimeTargets } from "./runtime-target";
 
 export const releaseStatus = pgEnum("releaseStatus", [
 	"queued",
@@ -50,10 +52,9 @@ export const releases = pgTable(
 		artifactId: text("artifactId")
 			.notNull()
 			.references(() => artifacts.artifactId, { onDelete: "restrict" }),
-		operationId: text("operationId").references(
-			() => operations.operationId,
-			{ onDelete: "set null" },
-		),
+		operationId: text("operationId").references(() => operations.operationId, {
+			onDelete: "set null",
+		}),
 		configurationSnapshotId: text("configurationSnapshotId")
 			.notNull()
 			.references(() => configurationSnapshots.configurationSnapshotId, {
@@ -62,7 +63,19 @@ export const releases = pgTable(
 		status: releaseStatus("status").notNull().default("queued"),
 		attempt: integer("attempt").notNull().default(1),
 		runtimeConfigVersion: text("runtimeConfigVersion").notNull(),
+		runtimeTargetId: text("runtimeTargetId").references(
+			() => runtimeTargets.runtimeTargetId,
+			{ onDelete: "restrict" },
+		),
 		runtimePlacementId: text("runtimePlacementId"),
+		previousRuntimeTargetId: text("previousRuntimeTargetId").references(
+			() => runtimeTargets.runtimeTargetId,
+			{ onDelete: "restrict" },
+		),
+		previousRuntimePlacementId: text("previousRuntimePlacementId"),
+		runtimeRelocationId: text("runtimeRelocationId"),
+		runtimeRelocationState: text("runtimeRelocationState"),
+		runtimeRelocationError: text("runtimeRelocationError"),
 		serviceIdentity: text("serviceIdentity").notNull(),
 		healthResult: jsonb("healthResult").$type<Record<string, unknown>>(),
 		failureCode: text("failureCode"),
@@ -98,6 +111,18 @@ export const releases = pgTable(
 		index("release_artifact_idx").on(table.artifactId),
 		index("release_configuration_snapshot_idx").on(
 			table.configurationSnapshotId,
+		),
+		index("release_runtime_target_status_idx").on(
+			table.runtimeTargetId,
+			table.status,
+		),
+		index("release_previous_runtime_target_idx").on(
+			table.previousRuntimeTargetId,
+			table.runtimeRelocationState,
+		),
+		check(
+			"release_runtime_relocation_state_valid",
+			sql`(${table.runtimeRelocationState} IS NULL AND ${table.runtimeRelocationId} IS NULL AND ${table.previousRuntimeTargetId} IS NULL AND ${table.previousRuntimePlacementId} IS NULL AND ${table.runtimeRelocationError} IS NULL) OR (${table.runtimeRelocationState} IN ('preparing', 'draining_old', 'failed') AND ${table.runtimeRelocationId} IS NOT NULL AND ${table.previousRuntimeTargetId} IS NOT NULL AND ${table.previousRuntimePlacementId} IS NOT NULL)`,
 		),
 		foreignKey({
 			name: "release_configuration_snapshot_ownership_fk",

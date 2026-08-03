@@ -79,5 +79,65 @@ export const api = createTRPCNext<AppRouter>({
 	transformer: superjson,
 });
 
+let operatorCsrfToken: string | null = null;
+let operatorCsrfRequest: Promise<string> | null = null;
+
+const getOperatorCsrfToken = async () => {
+	if (typeof window === "undefined") {
+		throw new Error("Operator API is browser-only");
+	}
+	if (operatorCsrfToken) return operatorCsrfToken;
+	if (!operatorCsrfRequest) {
+		operatorCsrfRequest = fetch("/api/operator/csrf", {
+			method: "GET",
+			credentials: "same-origin",
+			cache: "no-store",
+			headers: { Accept: "application/json" },
+		})
+			.then(async (response) => {
+				if (!response.ok) throw new Error("Operator session is unavailable");
+				const payload = (await response.json()) as { csrfToken?: unknown };
+				if (
+					typeof payload.csrfToken !== "string" ||
+					!/^[-_A-Za-z0-9]{43}$/.test(payload.csrfToken)
+				) {
+					throw new Error("Operator session is invalid");
+				}
+				operatorCsrfToken = payload.csrfToken;
+				return payload.csrfToken;
+			})
+			.finally(() => {
+				operatorCsrfRequest = null;
+			});
+	}
+	return operatorCsrfRequest;
+};
+
+export const clearOperatorApiSession = () => {
+	operatorCsrfToken = null;
+	operatorCsrfRequest = null;
+};
+
+/** Browser-only operator client. Never import this into customer surfaces. */
+export const operatorApi = createTRPCNext<AppRouter>({
+	config() {
+		return {
+			links: [
+				httpLink({
+					url: "/api/trpc",
+					transformer: superjson,
+					methodOverride: "POST",
+					headers: async () => ({
+						"Content-Type": "application/json",
+						"X-DeployTide-Operator-CSRF": await getOperatorCsrfToken(),
+					}),
+				}),
+			],
+		};
+	},
+	ssr: false,
+	transformer: superjson,
+});
+
 export type RouterInputs = inferRouterInputs<AppRouter>;
 export type RouterOutputs = inferRouterOutputs<AppRouter>;

@@ -17,6 +17,7 @@ import {
 	initVolumeBackupsCronJobs,
 	sendDokployRestartNotifications,
 	setupDirectories,
+	startCapacityReconciliationLoop,
 } from "@dokploy/server";
 import { config } from "dotenv";
 import packageInfo from "../package.json";
@@ -63,6 +64,7 @@ void app.prepare().then(async () => {
 
 		server.listen(PORT, HOST);
 		console.log(`Server Started on: http://${HOST}:${PORT}`);
+		startCapacityReconciliationLoop();
 		if (process.env.NODE_ENV === "production" && !IS_CLOUD) {
 			createDefaultMiddlewares();
 			await initializeNetwork();
