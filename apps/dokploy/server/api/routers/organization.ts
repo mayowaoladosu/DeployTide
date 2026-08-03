@@ -1,7 +1,9 @@
 import { db } from "@dokploy/server/db";
 import {
+	createUniqueWorkspaceSlug,
 	getDeployTideUrl,
 	IS_CLOUD,
+	recordActivity,
 	sendInvitationEmail,
 	softDeleteWorkspace,
 } from "@dokploy/server/index";
@@ -41,11 +43,12 @@ export const organizationRouter = createTRPCRouter({
 				await assertOrganizationLimit(ctx.user.id);
 			}
 
+			const slug = await createUniqueWorkspaceSlug(input.name);
 			const result = await db
 				.insert(organization)
 				.values({
 					...input,
-					slug: nanoid(),
+					slug,
 					createdAt: new Date(),
 					ownerId: ctx.user.id,
 				})
@@ -59,18 +62,17 @@ export const organizationRouter = createTRPCRouter({
 				});
 			}
 
-			// Check if this is the user's first organization
-			const existingMemberships = await db.query.member.findMany({
-				where: eq(member.userId, ctx.user.id),
-			});
-
 			await db.insert(member).values({
 				organizationId: result.id,
 				role: "owner",
 				createdAt: new Date(),
 				userId: ctx.user.id,
 			});
-			await audit(ctx, {
+			await recordActivity({
+				organizationId: result.id,
+				userId: ctx.user.id,
+				userEmail: ctx.user.email,
+				userRole: "owner",
 				action: "create",
 				resourceType: "organization",
 				resourceId: result.id,

@@ -1,4 +1,10 @@
 import http from "node:http";
+
+// The bundled server is the production entry point. Set this before importing
+// Next so its conditional React runtimes cannot initialize in development mode.
+const runtimeEnvironment = process.env as Record<string, string | undefined>;
+runtimeEnvironment.NODE_ENV ??= "production";
+
 import {
 	createDefaultMiddlewares,
 	createDefaultServerTraefikConfig,
@@ -13,7 +19,6 @@ import {
 	setupDirectories,
 } from "@dokploy/server";
 import { config } from "dotenv";
-import next from "next";
 import packageInfo from "../package.json";
 import { setupDockerContainerLogsWebSocketServer } from "./wss/docker-container-logs";
 import { setupDockerContainerTerminalWebSocketServer } from "./wss/docker-container-terminal";
@@ -23,9 +28,10 @@ import { setupDeploymentLogsWebSocketServer } from "./wss/listen-deployment";
 import { setupTerminalWebSocketServer } from "./wss/terminal";
 
 config({ path: ".env" });
+const { default: next } = await import("next");
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
 const HOST = process.env.HOST || "0.0.0.0";
-const dev = process.env.NODE_ENV !== "production";
+const dev = false;
 
 // Initialize critical directories and Traefik config BEFORE Next.js starts
 // This prevents race conditions with the install script

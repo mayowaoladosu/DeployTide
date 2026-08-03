@@ -6,7 +6,7 @@
 	"type": "module",
 	"scripts": {
 		"build": "node scripts/build.mjs",
-		"start": "node -r dotenv/config dist/migration.mjs && node -r dotenv/config dist/server.mjs",
+		"start": "node -r dotenv/config dist/migration.mjs && node -r dotenv/config -e \"process.env.NODE_ENV='production'; import('./dist/server.mjs')\"",
 		"build-server": "tsx esbuild.config.ts",
 		"build-next": "next build --webpack",
 		"setup": "tsx -r dotenv/config setup.ts && sleep 5 && pnpm run migration:run",

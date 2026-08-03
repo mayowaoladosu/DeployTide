@@ -43,6 +43,8 @@ export * from "./services/patch-repo";
 export * from "./services/port";
 export * from "./services/postgres";
 export * from "./services/preview-deployment";
+export * from "./services/product-overview";
+export * from "./services/product-slugs";
 export * from "./services/project";
 export * from "./services/provider-deliveries";
 export * from "./services/redirect";

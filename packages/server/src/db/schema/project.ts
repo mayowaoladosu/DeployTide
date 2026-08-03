@@ -1,4 +1,4 @@
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
 	type AnyPgColumn,
 	pgTable,
@@ -21,6 +21,9 @@ export const projects = pgTable("project", {
 		.primaryKey()
 		.$defaultFn(() => nanoid()),
 	name: text("name").notNull(),
+	slug: text("slug")
+		.notNull()
+		.default(sql`substr(md5(random()::text), 1, 12)`),
 	description: text("description"),
 	createdAt: text("createdAt")
 		.notNull()
@@ -40,6 +43,10 @@ export const projects = pgTable("project", {
 		table.projectId,
 		table.organizationId,
 	),
+	uniqueIndex("project_organization_slug_unique").on(
+		table.organizationId,
+		table.slug,
+	),
 ]);
 
 export const projectRelations = relations(projects, ({ many, one }) => ({
@@ -58,12 +65,19 @@ export const projectRelations = relations(projects, ({ many, one }) => ({
 const createSchema = createInsertSchema(projects, {
 	projectId: z.string().min(1),
 	name: z.string().min(1),
+	slug: z
+		.string()
+		.min(1)
+		.max(63)
+		.regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/)
+		.optional(),
 	description: z.string().optional(),
 	env: z.string().optional(),
 });
 
 export const apiCreateProject = createSchema.pick({
 	name: true,
+	slug: true,
 	description: true,
 	env: true,
 });
@@ -89,6 +103,7 @@ export const apiRemoveProject = createSchema
 export const apiUpdateProject = createSchema
 	.pick({
 		name: true,
+		slug: true,
 		description: true,
 		env: true,
 	})

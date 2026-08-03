@@ -21,7 +21,7 @@
 
 @theme {
 	--font-sans:
-		var(--font-inter), ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
+		var(--font-dt-sans), ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji",
 		"Segoe UI Emoji", "Segoe UI Symbol", "Noto Color Emoji";
 
 	--breakpoint-3xl: 1920px;
@@ -165,6 +165,12 @@
 
 @layer base {
 	:root {
+		--dt-ink: #111827;
+		--dt-cloud: #f6f7f3;
+		--dt-signal: #2db57f;
+		--dt-signal-deep: #167451;
+		--dt-warm: #d95b2e;
+		--dt-night: #090b0e;
 		--terminal-paste: rgba(0, 0, 0, 0.2);
 		--background: 0 0% 100%;
 		--foreground: 240 10% 3.9%;
@@ -213,6 +219,11 @@
 	}
 
 	.dark {
+		--dt-ink: #f7f8f4;
+		--dt-cloud: #090b0e;
+		--dt-signal: #51d39c;
+		--dt-signal-deep: #2db57f;
+		--dt-warm: #ee7449;
 		--terminal-paste: rgba(255, 255, 255, 0.2);
 		--background: 0 0% 0%;
 		--foreground: 0 0% 98%;
@@ -257,6 +268,29 @@
 		--sidebar-accent-foreground: 240 4.8% 95.9%;
 		--sidebar-border: 240 3.7% 15.9%;
 		--sidebar-ring: 217.2 91.2% 59.8%;
+	}
+}
+
+@layer components {
+	.dt-shell {
+		font-family: var(--font-dt-sans), sans-serif;
+		background-image:
+			linear-gradient(hsl(var(--foreground) / 0.025) 1px, transparent 1px),
+			linear-gradient(90deg, hsl(var(--foreground) / 0.025) 1px, transparent 1px);
+		background-size: 36px 36px;
+	}
+
+	.dt-display {
+		font-family: var(--font-dt-display), serif;
+		font-optical-sizing: auto;
+	}
+
+	.dt-panel {
+		@apply rounded-2xl border border-black/[0.08] bg-white/80 shadow-[0_18px_55px_rgba(17,24,39,0.06)] backdrop-blur-sm dark:border-white/[0.09] dark:bg-white/[0.045] dark:shadow-none;
+	}
+
+	.dt-focus {
+		@apply outline-none focus-visible:ring-2 focus-visible:ring-[var(--dt-warm)] focus-visible:ring-offset-2 focus-visible:ring-offset-[var(--dt-cloud)];
 	}
 }
 

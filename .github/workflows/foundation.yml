@@ -39,6 +39,9 @@ jobs:
       - name: Verify product boundaries
         run: pnpm check:product-boundaries
 
+      - name: Verify customer product shell
+        run: pnpm check:product-shell
+
       - name: Type-check server
         run: pnpm --filter=server typecheck
 

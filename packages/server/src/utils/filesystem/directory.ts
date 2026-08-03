@@ -57,12 +57,11 @@ export const removeDirectoryCode = async (
 ) => {
 	const { APPLICATIONS_PATH } = paths(!!serverId);
 	const directoryPath = path.join(APPLICATIONS_PATH, appName);
-	const command = `rm -rf ${directoryPath}`;
 	try {
 		if (serverId) {
-			await execAsyncRemote(serverId, command);
+			await execAsyncRemote(serverId, `rm -rf ${directoryPath}`);
 		} else {
-			await execAsync(command);
+			await fsPromises.rm(directoryPath, { recursive: true, force: true });
 		}
 	} catch (error) {
 		console.error(`Error removing ${directoryPath}: ${error}`);

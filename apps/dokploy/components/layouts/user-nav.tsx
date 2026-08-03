@@ -1,10 +1,10 @@
-import { ChevronsUpDown } from "lucide-react";
+import { LogOut, Moon, Settings, Sun, UserRound } from "lucide-react";
 import { useRouter } from "next/router";
+import { useTheme } from "next-themes";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import {
 	DropdownMenu,
 	DropdownMenuContent,
-	DropdownMenuGroup,
 	DropdownMenuItem,
 	DropdownMenuLabel,
 	DropdownMenuSeparator,
@@ -13,147 +13,76 @@ import {
 import { authClient } from "@/lib/auth-client";
 import { getFallbackAvatarInitials } from "@/lib/utils";
 import { api } from "@/utils/api";
-import { ModeToggle } from "../ui/modeToggle";
-import { SidebarMenuButton } from "../ui/sidebar";
-
-const _AUTO_CHECK_UPDATES_INTERVAL_MINUTES = 7;
 
 export const UserNav = () => {
 	const router = useRouter();
+	const { theme, setTheme } = useTheme();
 	const { data } = api.user.get.useQuery();
-	const { data: permissions } = api.user.getPermissions.useQuery();
-	const { data: isCloud } = api.settings.isCloud.useQuery();
-
-	// const { mutateAsync } = api.auth.logout.useMutation();
+	const { data: context } = api.product.context.useQuery();
+	const workspaceHref = context?.workspace.slug
+		? `/${context.workspace.slug}`
+		: "/dashboard/home";
 
 	return (
 		<DropdownMenu>
 			<DropdownMenuTrigger asChild>
-				<SidebarMenuButton
-					size="lg"
-					className="data-[state=open]:bg-sidebar-accent data-[state=open]:text-sidebar-accent-foreground"
+				<button
+					type="button"
+					className="dt-focus rounded-full border border-black/10 bg-white/75 p-0.5 shadow-sm transition-transform hover:-translate-y-0.5 dark:border-white/10 dark:bg-white/[0.06]"
+					aria-label="Open account menu"
 				>
-					<Avatar className="h-8 w-8 rounded-lg">
+					<Avatar className="size-8">
 						<AvatarImage
-							className="object-cover"
 							src={data?.user?.image || ""}
-							alt={data?.user?.image || ""}
+							alt={data?.user?.firstName || "Account"}
+							className="object-cover"
 						/>
-						<AvatarFallback className="rounded-lg">
+						<AvatarFallback className="text-xs font-semibold">
 							{getFallbackAvatarInitials(
-								`${data?.user?.firstName} ${data?.user?.lastName}`.trim(),
+								`${data?.user?.firstName || ""} ${data?.user?.lastName || ""}`.trim() ||
+									data?.user?.email ||
+									"DT",
 							)}
 						</AvatarFallback>
 					</Avatar>
-					<div className="grid flex-1 text-left text-sm leading-tight">
-						<span className="truncate font-semibold">Account</span>
-						<span className="truncate text-xs">{data?.user?.email}</span>
-					</div>
-					<ChevronsUpDown className="ml-auto size-4" />
-				</SidebarMenuButton>
+				</button>
 			</DropdownMenuTrigger>
-			<DropdownMenuContent
-				className="w-(--radix-dropdown-menu-trigger-width) min-w-56 rounded-lg"
-				side="bottom"
-				align="end"
-				sideOffset={4}
-			>
-				<div className="flex items-center justify-between px-2 py-1.5">
-					<DropdownMenuLabel className="flex flex-col">
-						My Account
-						<span className="text-xs font-normal text-muted-foreground">
-							{data?.user?.email}
-						</span>
-					</DropdownMenuLabel>
-					<ModeToggle />
-				</div>
+			<DropdownMenuContent align="end" className="w-64 p-2">
+				<DropdownMenuLabel className="px-2 py-2">
+					<span className="block truncate font-semibold">
+						{[data?.user?.firstName, data?.user?.lastName].filter(Boolean).join(" ") ||
+							"Account"}
+					</span>
+					<span className="block truncate text-xs font-normal text-muted-foreground">
+						{data?.user?.email}
+					</span>
+				</DropdownMenuLabel>
 				<DropdownMenuSeparator />
-				<DropdownMenuGroup>
-					<DropdownMenuItem
-						className="cursor-pointer"
-						onClick={() => {
-							router.push("/dashboard/settings/profile");
-						}}
-					>
-						Profile
-					</DropdownMenuItem>
-					<DropdownMenuItem
-						className="cursor-pointer"
-						onClick={() => {
-							router.push("/dashboard/home");
-						}}
-					>
-						Projects
-					</DropdownMenuItem>
-					{!isCloud ? (
-						<>
-							<DropdownMenuItem
-								className="cursor-pointer"
-								onClick={() => {
-									router.push("/dashboard/monitoring");
-								}}
-							>
-								Monitoring
-							</DropdownMenuItem>
-							{permissions?.traefikFiles.read && (
-								<DropdownMenuItem
-									className="cursor-pointer"
-									onClick={() => {
-										router.push("/dashboard/traefik");
-									}}
-								>
-									Traefik
-								</DropdownMenuItem>
-							)}
-							{permissions?.docker.read && (
-								<DropdownMenuItem
-									className="cursor-pointer"
-									onClick={() => {
-										router.push("/dashboard/docker", undefined, {
-											shallow: true,
-										});
-									}}
-								>
-									Docker
-								</DropdownMenuItem>
-							)}
-						</>
-					) : (
-						permissions?.organization.update && (
-							<DropdownMenuItem
-								className="cursor-pointer"
-								onClick={() => {
-									router.push("/dashboard/settings/servers");
-								}}
-							>
-								Servers
-							</DropdownMenuItem>
-						)
-					)}
-				</DropdownMenuGroup>
-				{isCloud && data?.role === "owner" && (
-					<DropdownMenuItem
-						className="cursor-pointer"
-						onClick={() => {
-							router.push("/dashboard/settings/billing");
-						}}
-					>
-						Billing
-					</DropdownMenuItem>
-				)}
+				<DropdownMenuItem onClick={() => router.push(workspaceHref)} className="gap-2 py-2.5">
+					<UserRound className="size-4" /> Workspace
+				</DropdownMenuItem>
+				<DropdownMenuItem
+					onClick={() => router.push("/dashboard/settings/profile")}
+					className="gap-2 py-2.5"
+				>
+					<Settings className="size-4" /> Profile settings
+				</DropdownMenuItem>
+				<DropdownMenuItem
+					onClick={() => setTheme(theme === "dark" ? "light" : "dark")}
+					className="gap-2 py-2.5"
+				>
+					{theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+					{theme === "dark" ? "Use light theme" : "Use dark theme"}
+				</DropdownMenuItem>
 				<DropdownMenuSeparator />
 				<DropdownMenuItem
-					className="cursor-pointer"
+					className="gap-2 py-2.5 text-destructive focus:text-destructive"
 					onClick={async () => {
-						await authClient.signOut().then(() => {
-							router.push("/");
-						});
-						// await mutateAsync().then(() => {
-						// 	router.push("/");
-						// });
+						await authClient.signOut();
+						await router.push("/");
 					}}
 				>
-					Log out
+					<LogOut className="size-4" /> Log out
 				</DropdownMenuItem>
 			</DropdownMenuContent>
 		</DropdownMenu>

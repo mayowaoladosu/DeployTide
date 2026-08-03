@@ -907,6 +907,12 @@ export const applicationRouter = createTRPCRouter({
 				server: !!app.serverId,
 				serverId: app.serverId ?? undefined,
 			};
+			await audit(ctx, {
+				action: "deploy",
+				resourceType: "application",
+				resourceId: app.applicationId,
+				resourceName: app.appName,
+			});
 			if (IS_CLOUD && app.serverId) {
 				deploy(jobData).catch((error) => {
 					console.error("Background deployment failed:", error);
@@ -922,12 +928,6 @@ export const applicationRouter = createTRPCRouter({
 					removeOnFail: true,
 				},
 			);
-			await audit(ctx, {
-				action: "deploy",
-				resourceType: "application",
-				resourceId: app.applicationId,
-				resourceName: app.appName,
-			});
 			return true;
 		}),
 	updateTraefikConfig: protectedProcedure

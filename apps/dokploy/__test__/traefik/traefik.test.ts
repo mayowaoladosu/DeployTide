@@ -71,6 +71,7 @@ const baseApp: ApplicationNested = {
 		projectId: "",
 		project: {
 			env: "",
+			slug: "project",
 			organizationId: "",
 			primaryApplicationId: null,
 			deletedAt: null,

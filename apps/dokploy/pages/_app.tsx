@@ -1,19 +1,23 @@
 import "@/styles/globals.css";
 
+import { BRAND } from "@dokploy/server/brand";
 import type { NextPage } from "next";
 import type { AppProps } from "next/app";
-import { Inter } from "next/font/google";
+import { Manrope, Newsreader } from "next/font/google";
 import Head from "next/head";
 import { ThemeProvider } from "next-themes";
 import NextTopLoader from "nextjs-toploader";
 import type { ReactElement, ReactNode } from "react";
-import { BRAND } from "@dokploy/server/brand";
 import { SearchCommand } from "@/components/dashboard/search-command";
 import { Toaster } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { api } from "@/utils/api";
 
-const inter = Inter({ subsets: ["latin"] });
+const manrope = Manrope({ subsets: ["latin"], variable: "--font-dt-sans" });
+const newsreader = Newsreader({
+	subsets: ["latin"],
+	variable: "--font-dt-display",
+});
 
 export type NextPageWithLayout<P = {}, IP = P> = NextPage<P, IP> & {
 	getLayout?: (page: ReactElement) => ReactNode;
@@ -32,13 +36,7 @@ const MyApp = ({
 
 	return (
 		<>
-			<style jsx global>
-				{`
-					:root {
-						--font-inter: ${inter.style.fontFamily};
-					}
-				`}
-			</style>
+			<div className={`${manrope.variable} ${newsreader.variable}`}>
 			<Head>
 				<title>{BRAND.name}</title>
 				<meta name="description" content={BRAND.description} />
@@ -57,6 +55,7 @@ const MyApp = ({
 					{getLayout(<Component {...pageProps} />)}
 				</ThemeProvider>
 			</TooltipProvider>
+			</div>
 		</>
 	);
 };

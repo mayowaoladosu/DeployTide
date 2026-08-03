@@ -22,7 +22,7 @@ import {
 import { TRPCError } from "@trpc/server";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import type { z } from "zod";
-import { createProductionEnvironment } from "./environment";
+import { createUniqueProjectSlug } from "./product-slugs";
 
 export type Project = typeof projects.$inferSelect;
 
@@ -30,30 +30,48 @@ export const createProject = async (
 	input: z.infer<typeof apiCreateProject>,
 	organizationId: string,
 ) => {
-	const newProject = await db
-		.insert(projects)
-		.values({
-			...input,
-			organizationId: organizationId,
-		})
-		.returning()
-		.then((value) => value[0]);
-
-	if (!newProject) {
-		throw new TRPCError({
-			code: "BAD_REQUEST",
-			message: "Error creating the project",
-		});
-	}
-
-	// Automatically create a production environment
-	const newEnvironment = await createProductionEnvironment(
-		newProject.projectId,
+	const slug = await createUniqueProjectSlug(
+		organizationId,
+		input.slug || input.name,
 	);
-	return {
-		project: newProject,
-		environment: newEnvironment,
-	};
+	return db.transaction(async (transaction) => {
+		const [newProject] = await transaction
+			.insert(projects)
+			.values({
+				...input,
+				slug,
+				organizationId,
+			})
+			.returning();
+
+		if (!newProject) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "Error creating the project",
+			});
+		}
+
+		const [newEnvironment] = await transaction
+			.insert(environments)
+			.values({
+				name: "production",
+				description: "Production environment",
+				projectId: newProject.projectId,
+				organizationId,
+				isDefault: true,
+				kind: "production",
+			})
+			.returning();
+
+		if (!newEnvironment) {
+			throw new TRPCError({
+				code: "BAD_REQUEST",
+				message: "Error creating the production environment",
+			});
+		}
+
+		return { project: newProject, environment: newEnvironment };
+	});
 };
 
 export const findProjectById = async (projectId: string) => {

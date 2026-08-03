@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import path from "node:path";
 import dotenv, { type DotenvParseOutput } from "dotenv";
 import esbuild from "esbuild";
 
@@ -17,6 +19,26 @@ function prepareDefine(config: DotenvParseOutput | undefined) {
 }
 
 const define = prepareDefine(result.parsed);
+
+const serverSourceRoot = path.resolve("../../packages/server/src");
+const localServerPlugin: esbuild.Plugin = {
+	name: "bundle-local-server-workspace",
+	setup(build) {
+		build.onResolve({ filter: /^@dokploy\/server(?:\/.*)?$/ }, (args) => {
+			const subpath = args.path.replace(/^@dokploy\/server\/?/, "");
+			const base = subpath ? path.join(serverSourceRoot, subpath) : path.join(serverSourceRoot, "index");
+			for (const candidate of [
+				`${base}.ts`,
+				`${base}.tsx`,
+				path.join(base, "index.ts"),
+				path.join(base, "index.tsx"),
+			]) {
+				if (existsSync(candidate)) return { path: candidate };
+			}
+			return { errors: [{ text: `Unable to resolve local server module ${args.path}` }] };
+		});
+	},
+};
 
 try {
 	esbuild
@@ -42,6 +64,7 @@ try {
 			tsconfig: "tsconfig.server.json",
 			define,
 			packages: "external",
+			plugins: [localServerPlugin],
 		})
 		.catch(() => {
 			return process.exit(1);

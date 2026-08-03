@@ -3,6 +3,7 @@ import {
 	beginDeploymentCancellation,
 	createConfigurationSnapshot,
 	createGithub,
+	createProject,
 	createServer,
 	deleteProject,
 	deleteServer,
@@ -108,6 +109,24 @@ const callerFor = (organizationId: string) =>
 		},
 	} as never);
 
+const restrictedCaller = () =>
+	appRouter.createCaller({
+		db,
+		req: { headers: {} },
+		res: {},
+		session: {
+			id: "session-phase2-restricted",
+			userId: "phase2_integration_user_restricted",
+			activeOrganizationId: orgA,
+		},
+		user: {
+			id: "phase2_integration_user_restricted",
+			ownerId: "phase2_integration_user_restricted",
+			email: "phase2-restricted@deploytide.local",
+			role: "member",
+		},
+	} as never);
+
 const seedRelease = async (
 	prefix: string,
 	organizationId: string,
@@ -166,12 +185,13 @@ describeDatabase("Phase 2 canonical database invariants", () => {
 	beforeAll(async () => {
 		await sql`delete from "webServerSettings" where id = 'phase2_crypto_settings'`;
 		await cleanupFixtureRows();
-		await sql`delete from "user" where id in ('phase2_integration_user_a', 'phase2_integration_user_b')`;
+		await sql`delete from "user" where id in ('phase2_integration_user_a', 'phase2_integration_user_b', 'phase2_integration_user_restricted')`;
 		await sql`
 			insert into "user" (id, "expirationDate", "createdAt", email, email_verified, updated_at)
 			values
 				('phase2_integration_user_a', '2099-01-01', '2026-01-01', 'phase2-a@deploytide.local', true, now()),
-				('phase2_integration_user_b', '2099-01-01', '2026-01-01', 'phase2-b@deploytide.local', true, now())
+				('phase2_integration_user_b', '2099-01-01', '2026-01-01', 'phase2-b@deploytide.local', true, now()),
+				('phase2_integration_user_restricted', '2099-01-01', '2026-01-01', 'phase2-restricted@deploytide.local', true, now())
 		`;
 		await sql`
 			insert into organization (id, name, slug, created_at, owner_id)
@@ -184,15 +204,16 @@ describeDatabase("Phase 2 canonical database invariants", () => {
 			insert into member (id, organization_id, user_id, role, created_at)
 			values
 				('phase2_member_a', ${orgA}, 'phase2_integration_user_a', 'owner', now()),
-				('phase2_member_b', ${orgB}, 'phase2_integration_user_b', 'owner', now())
+				('phase2_member_b', ${orgB}, 'phase2_integration_user_b', 'owner', now()),
+				('phase2_member_restricted', ${orgA}, 'phase2_integration_user_restricted', 'member', now())
 		`;
 		await sql`
-			insert into project ("projectId", name, "createdAt", "organizationId")
+			insert into project ("projectId", name, slug, "createdAt", "organizationId")
 			values
-				(${projectA}, 'Project A', '2026-01-01', ${orgA}),
-				(${projectB}, 'Project B', '2026-01-01', ${orgB}),
-				(${projectDelete}, 'Project Delete', '2026-01-01', ${orgA}),
-				(${workspaceProjectDelete}, 'Workspace Delete', '2026-01-01', ${orgDelete})
+				(${projectA}, 'Project A', 'project-a', '2026-01-01', ${orgA}),
+				(${projectB}, 'Project B', 'project-b', '2026-01-01', ${orgB}),
+				(${projectDelete}, 'Project Delete', 'project-delete', '2026-01-01', ${orgA}),
+				(${workspaceProjectDelete}, 'Workspace Delete', 'workspace-delete', '2026-01-01', ${orgDelete})
 		`;
 		await sql`
 			insert into environment (
@@ -211,6 +232,36 @@ describeDatabase("Phase 2 canonical database invariants", () => {
 				'phase2_application_a', 'Application A', 'phase2-application-a',
 				'2026-01-01', ${environmentA}, ${orgA}, ${projectA}
 			)
+		`;
+		await sql`
+			insert into environment (
+				"environmentId", name, "createdAt", "projectId", "organizationId", "isDefault", kind, "protectionPolicy"
+			) values (
+				'phase2_integration_environment_private', 'Private', '2026-01-02', ${projectA}, ${orgA}, false, 'custom', '{"approval":"private"}'::jsonb
+			)
+		`;
+		await sql`
+			insert into application (
+				"applicationId", name, "appName", "createdAt", "environmentId", "organizationId", "projectId"
+			) values (
+				'phase2_application_private', 'Private Application', 'phase2-application-private', '2026-01-02',
+				'phase2_integration_environment_private', ${orgA}, ${projectA}
+			)
+		`;
+		await sql`
+			insert into "environmentVariable" (
+				"environmentVariableId", "organizationId", "projectId", "environmentId", scope, key, exposure, sensitive, "currentVersion"
+			) values
+				('phase2_variable_visible', ${orgA}, ${projectA}, ${environmentA}, 'environment', 'VISIBLE_KEY', 'runtime', false, 1),
+				('phase2_variable_private', ${orgA}, ${projectA}, 'phase2_integration_environment_private', 'environment', 'PRIVATE_KEY', 'runtime', true, 1)
+		`;
+		await sql`
+			update member set
+				"canCreateProjects" = true,
+				"accesedProjects" = array[${projectA}],
+				"accessedEnvironments" = array[${environmentA}],
+				"accesedServices" = array['phase2_application_a']
+			where id = 'phase2_member_restricted'
 		`;
 		await sql`
 			insert into compose (
@@ -316,7 +367,7 @@ describeDatabase("Phase 2 canonical database invariants", () => {
 
 	afterAll(async () => {
 		await cleanupFixtureRows();
-		await sql`delete from "user" where id in ('phase2_integration_user_a', 'phase2_integration_user_b')`;
+		await sql`delete from "user" where id in ('phase2_integration_user_a', 'phase2_integration_user_b', 'phase2_integration_user_restricted')`;
 		await sql.end();
 	});
 
@@ -831,6 +882,108 @@ describeDatabase("Phase 2 canonical database invariants", () => {
 		const [serialized] = await sql<[{ body: string }]>
 			`select row_to_json(d)::text as body from "providerDelivery" d where "providerDeliveryId" = ${first.delivery.providerDeliveryId}`;
 		expect(serialized?.body).not.toContain("provider-secret");
+	});
+
+	it("serves tenant-safe root-slug overviews without infrastructure fields", async () => {
+		const caller = callerFor(orgA);
+		const workspace = await caller.product.workspaceOverview();
+		expect(workspace.projects.map((project) => project.slug)).toContain(
+			"project-a",
+		);
+		expect(workspace.projects.map((project) => project.slug)).not.toContain(
+			"project-b",
+		);
+		const project = await caller.product.projectOverview({
+			projectSlug: "project-a",
+		});
+		expect(project.project.projectId).toBe(projectA);
+		expect(project.resources.map((resource) => resource.id)).toContain(
+			"phase2_application_a",
+		);
+		const serialized = JSON.stringify({ workspace, project });
+		for (const forbidden of [
+			'"serverId"',
+			'"serverName"',
+			'"ipAddress"',
+			'"sshKeyId"',
+			'"registryRef"',
+			'"runtimePlacementId"',
+			'"logPath"',
+		]) {
+			expect(serialized).not.toContain(forbidden);
+		}
+
+		await expect(sql`
+			insert into project ("projectId", name, slug, "createdAt", "organizationId")
+			values ('phase3_duplicate_slug', 'Duplicate', 'project-a', '2026-01-01', ${orgA})
+		`).rejects.toMatchObject({ code: "23505" });
+		await expect(sql`
+			insert into project ("projectId", name, slug, "createdAt", "organizationId")
+			values ('phase3_foreign_same_slug', 'Same slug elsewhere', 'project-a', '2026-01-01', ${orgB})
+		`).resolves.toBeDefined();
+	});
+
+	it("limits product metadata to granted environments and services", async () => {
+		const project = await restrictedCaller().product.projectOverview({
+			projectSlug: "project-a",
+		});
+		expect(project.environments.map((environment) => environment.environmentId)).toEqual([
+			environmentA,
+		]);
+		expect(project.resources.map((resource) => resource.id)).toContain(
+			"phase2_application_a",
+		);
+		expect(project.resources.map((resource) => resource.id)).not.toContain(
+			"phase2_application_private",
+		);
+		expect(project.variables.map((variable) => variable.key)).toContain(
+			"VISIBLE_KEY",
+		);
+		expect(project.variables.map((variable) => variable.key)).not.toContain(
+			"PRIVATE_KEY",
+		);
+		expect(JSON.stringify(project)).not.toContain("PRIVATE_KEY");
+		expect(JSON.stringify(project)).not.toContain("private\"}");
+	});
+
+	it("rejects cleanup attempts without the matching import proof", async () => {
+		await expect(
+			restrictedCaller().product.cleanupFailedImport({
+				projectId: projectA,
+				expiresAt: Date.now() + 60_000,
+				proof: "invalid-proof",
+			}),
+		).rejects.toMatchObject({ code: "FORBIDDEN" });
+		const [project] = await sql<[{ deletedAt: Date | null }]>
+			`select "deletedAt" as "deletedAt" from project where "projectId" = ${projectA}`;
+		expect(project?.deletedAt).toBeNull();
+	});
+
+	it("creates a project and production environment atomically", async () => {
+		await sql.unsafe(`
+			create or replace function phase3_reject_production_environment()
+			returns trigger language plpgsql as $$
+			begin
+				raise exception 'injected production environment failure';
+			end;
+			$$;
+			create trigger phase3_reject_production_environment
+			before insert on environment
+			for each row execute function phase3_reject_production_environment();
+		`);
+		try {
+			await expect(
+				createProject({ name: "Atomic Failure" }, orgA),
+			).rejects.toThrow();
+		} finally {
+			await sql.unsafe(`
+				drop trigger if exists phase3_reject_production_environment on environment;
+				drop function if exists phase3_reject_production_environment();
+			`);
+		}
+		const [orphan] = await sql<[{ count: number }]>
+			`select count(*)::int as count from project where name = 'Atomic Failure' and "organizationId" = ${orgA}`;
+		expect(orphan?.count).toBe(0);
 	});
 
 	it("soft-deletes customer records without destroying retained rows", async () => {

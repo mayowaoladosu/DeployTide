@@ -126,11 +126,11 @@ const Register = ({ isCloud }: Props) => {
 						<Link href="/" className="flex flex-row items-center gap-2">
 							<Logo className="size-12" />
 						</Link>
-						{isCloud ? "Sign Up" : "Setup the server"}
+						{isCloud ? "Sign Up" : "Create your account"}
 					</CardTitle>
 					<CardDescription>
 						Enter your email and password to{" "}
-						{isCloud ? "create an account" : "setup the server"}
+						{isCloud ? "create an account" : "start your workspace"}
 					</CardDescription>
 					<div className="mx-auto w-full max-w-lg bg-transparent">
 						{isError && (

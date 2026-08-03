@@ -4,8 +4,8 @@
 
 DO $$
 BEGIN
-	IF (SELECT max(created_at) FROM drizzle.__drizzle_migrations) IS DISTINCT FROM 1785689568547::bigint THEN
-		RAISE EXCEPTION 'Phase 2 cutback supports migration head 0183 only';
+	IF (SELECT max(created_at) FROM drizzle.__drizzle_migrations) IS DISTINCT FROM 1785709133786::bigint THEN
+		RAISE EXCEPTION 'Compatibility cutback supports migration head 0184 only';
 	END IF;
 	IF
 		EXISTS (SELECT 1 FROM "organization" WHERE "deleted_at" IS NOT NULL) OR
@@ -124,6 +124,7 @@ ALTER TABLE "preview_deployments" DROP COLUMN IF EXISTS "projectId" CASCADE;--> 
 ALTER TABLE "preview_deployments" DROP COLUMN IF EXISTS "environmentId" CASCADE;--> statement-breakpoint
 ALTER TABLE "preview_deployments" DROP COLUMN IF EXISTS "deletedAt" CASCADE;--> statement-breakpoint
 ALTER TABLE "project" DROP COLUMN IF EXISTS "primaryApplicationId" CASCADE;--> statement-breakpoint
+ALTER TABLE "project" DROP COLUMN IF EXISTS "slug" CASCADE;--> statement-breakpoint
 ALTER TABLE "project" DROP COLUMN IF EXISTS "deletedAt" CASCADE;--> statement-breakpoint
 ALTER TABLE "application" DROP COLUMN IF EXISTS "organizationId" CASCADE;--> statement-breakpoint
 ALTER TABLE "application" DROP COLUMN IF EXISTS "projectId" CASCADE;--> statement-breakpoint
@@ -210,5 +211,6 @@ WHERE created_at IN (
 	1785684550226,
 	1785687432136,
 	1785687811977,
-	1785689568547
+	1785689568547,
+	1785709133786
 );--> statement-breakpoint

@@ -16,6 +16,31 @@ const nextConfig = {
 	outputFileTracingRoot: repositoryRoot,
 	reactStrictMode: true,
 	transpilePackages: ["@dokploy/server"],
+	async redirects() {
+		const legacyWorkspaceRoutes = [
+			"/dashboard/deployments",
+			"/dashboard/monitoring",
+			"/dashboard/schedules",
+			"/dashboard/traefik",
+			"/dashboard/docker",
+			"/dashboard/swarm",
+			"/dashboard/networks",
+			"/dashboard/requests",
+			"/dashboard/settings/server",
+			"/dashboard/settings/servers",
+			"/dashboard/settings/ssh-keys",
+			"/dashboard/settings/registry",
+			"/dashboard/settings/destinations",
+			"/dashboard/settings/certificates",
+			"/dashboard/settings/cluster",
+			"/dashboard/settings/deployments",
+		];
+		return legacyWorkspaceRoutes.map((source) => ({
+			source,
+			destination: "/dashboard/home",
+			permanent: false,
+		}));
+	},
 	async headers() {
 		return [
 			{

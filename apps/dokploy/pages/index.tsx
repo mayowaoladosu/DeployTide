@@ -409,12 +409,14 @@ Home.getLayout = (page: ReactElement) => {
 export async function getServerSideProps(context: GetServerSidePropsContext) {
 	if (IS_CLOUD) {
 		try {
-			const { user } = await validateRequest(context.req);
+			const { user, session } = await validateRequest(context.req);
 			if (user) {
 				return {
 					redirect: {
 						permanent: false,
-						destination: "/dashboard/home",
+						destination: session?.activeOrganizationId
+							? "/dashboard/home"
+							: "/onboarding",
 					},
 				};
 			}
@@ -437,13 +439,15 @@ export async function getServerSideProps(context: GetServerSidePropsContext) {
 		};
 	}
 
-	const { user } = await validateRequest(context.req);
+	const { user, session } = await validateRequest(context.req);
 
 	if (user) {
 		return {
 			redirect: {
 				permanent: false,
-				destination: "/dashboard/home",
+				destination: session?.activeOrganizationId
+					? "/dashboard/home"
+					: "/onboarding",
 			},
 		};
 	}

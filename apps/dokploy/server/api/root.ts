@@ -28,6 +28,7 @@ import { patchRouter } from "./routers/patch";
 import { portRouter } from "./routers/port";
 import { postgresRouter } from "./routers/postgres";
 import { previewDeploymentRouter } from "./routers/preview-deployment";
+import { productRouter } from "./routers/product";
 import { projectRouter } from "./routers/project";
 import { redirectsRouter } from "./routers/redirects";
 import { redisRouter } from "./routers/redis";
@@ -75,6 +76,7 @@ export const appRouter = createTRPCRouter({
 	port: portRouter,
 	postgres: postgresRouter,
 	previewDeployment: previewDeploymentRouter,
+	product: productRouter,
 	project: projectRouter,
 	redirects: redirectsRouter,
 	redis: redisRouter,

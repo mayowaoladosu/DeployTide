@@ -1,19 +1,8 @@
 "use client";
 
-import { BookIcon, CircuitBoard, GlobeIcon } from "lucide-react";
+import { Activity, FolderGit2, Gauge, Globe2, Plus, Rocket, Search } from "lucide-react";
 import { useRouter } from "next/router";
-import React from "react";
-import {
-	extractServices,
-	type Services,
-} from "@/components/dashboard/settings/users/add-permissions";
-import {
-	MariadbIcon,
-	MongodbIcon,
-	MysqlIcon,
-	PostgresqlIcon,
-	RedisIcon,
-} from "@/components/icons/data-tools-icons";
+import { useEffect, useMemo, useState } from "react";
 import {
 	CommandDialog,
 	CommandEmpty,
@@ -24,210 +13,101 @@ import {
 	CommandSeparator,
 } from "@/components/ui/command";
 import { api } from "@/utils/api";
-import { StatusTooltip } from "../shared/status-tooltip";
-
-// Extended Services type to include environmentId and environmentName for search navigation
-type SearchServices = Services & {
-	environmentId: string;
-	environmentName: string;
-};
-
-const extractAllServicesFromProject = (project: any): SearchServices[] => {
-	const allServices: SearchServices[] = [];
-
-	// Iterate through all environments in the project
-	project.environments?.forEach((environment: any) => {
-		const environmentServices = extractServices(environment);
-		const servicesWithEnvironmentId: SearchServices[] = environmentServices.map(
-			(service) => ({
-				...service,
-				environmentId: environment.environmentId,
-				environmentName: environment.name,
-			}),
-		);
-		allServices.push(...servicesWithEnvironmentId);
-	});
-
-	return allServices;
-};
 
 export const SearchCommand = () => {
 	const router = useRouter();
-	const [open, setOpen] = React.useState(false);
-	const [search, setSearch] = React.useState("");
+	const [open, setOpen] = useState(false);
+	const [search, setSearch] = useState("");
 	const { data: session } = api.user.session.useQuery();
-	const { data } = api.project.all.useQuery(undefined, {
-		enabled: !!session,
+	const { data: context } = api.product.context.useQuery(undefined, {
+		enabled: Boolean(session),
 	});
-	const { data: isCloud } = api.settings.isCloud.useQuery();
 
-	React.useEffect(() => {
-		const down = (e: KeyboardEvent) => {
-			if (e.code === "KeyJ" && (e.metaKey || e.ctrlKey)) {
-				e.preventDefault();
-				setOpen((open) => !open);
+	useEffect(() => {
+		const openSearch = () => setOpen(true);
+		const keydown = (event: KeyboardEvent) => {
+			const target = event.target as HTMLElement | null;
+			const editing =
+				target?.tagName === "INPUT" ||
+				target?.tagName === "TEXTAREA" ||
+				target?.isContentEditable;
+			if (
+				(!editing && event.key === "/") ||
+				(event.key.toLowerCase() === "k" && (event.metaKey || event.ctrlKey))
+			) {
+				event.preventDefault();
+				setOpen(true);
 			}
 		};
-
-		document.addEventListener("keydown", down);
-		return () => document.removeEventListener("keydown", down);
+		document.addEventListener("deploytide:search", openSearch);
+		document.addEventListener("keydown", keydown);
+		return () => {
+			document.removeEventListener("deploytide:search", openSearch);
+			document.removeEventListener("keydown", keydown);
+		};
 	}, []);
 
+	const workspaceItems = useMemo(() => {
+		if (!context?.workspace.slug) return [];
+		const base = `/${context.workspace.slug}`;
+		return [
+			{ label: "Workspace overview", href: base, icon: Search },
+			{ label: "All deployments", href: `${base}/deployments`, icon: Rocket },
+			{ label: "Workspace activity", href: `${base}/activity`, icon: Activity },
+			{ label: "Domain inventory", href: `${base}/domains`, icon: Globe2 },
+			{ label: "Current usage", href: `${base}/usage`, icon: Gauge },
+		];
+	}, [context]);
+
+	const go = async (href: string) => {
+		setOpen(false);
+		setSearch("");
+		await router.push(href);
+	};
+
 	return (
-		<div>
-			<CommandDialog open={open} onOpenChange={setOpen}>
-				<CommandInput
-					placeholder={"Search projects or settings"}
-					value={search}
-					onValueChange={setSearch}
-				/>
-				<CommandList>
-					<CommandEmpty>
-						No projects added yet. Click on Create project.
-					</CommandEmpty>
-					<CommandGroup heading={"Projects"}>
-						<CommandList>
-							{data?.map((project) => {
-								// Find default environment from accessible environments, or fall back to first accessible environment
-								const defaultEnvironment =
-									project.environments.find(
-										(environment) => environment.isDefault,
-									) || project?.environments?.[0];
-
-								if (!defaultEnvironment) return null;
-
-								return (
-									<CommandItem
-										key={project.projectId}
-										onSelect={() => {
-											router.push(
-												`/dashboard/project/${project.projectId}/environment/${defaultEnvironment.environmentId}`,
-											);
-											setOpen(false);
-										}}
-									>
-										<BookIcon className="size-4 text-muted-foreground mr-2" />
-										{project.name} / {defaultEnvironment.name}
-									</CommandItem>
-								);
-							})}
-						</CommandList>
-					</CommandGroup>
-					<CommandSeparator />
-					<CommandGroup heading={"Services"}>
-						<CommandList>
-							{data?.map((project) => {
-								const applications: SearchServices[] =
-									extractAllServicesFromProject(project);
-								return applications.map((application) => (
-									<CommandItem
-										key={application.id}
-										onSelect={() => {
-											router.push(
-												`/dashboard/project/${project.projectId}/environment/${application.environmentId}/services/${application.type}/${application.id}`,
-											);
-											setOpen(false);
-										}}
-									>
-										{application.type === "postgres" && (
-											<PostgresqlIcon className="h-6 w-6 mr-2" />
-										)}
-										{application.type === "redis" && (
-											<RedisIcon className="h-6 w-6 mr-2" />
-										)}
-										{application.type === "mariadb" && (
-											<MariadbIcon className="h-6 w-6 mr-2" />
-										)}
-										{application.type === "mongo" && (
-											<MongodbIcon className="h-6 w-6 mr-2" />
-										)}
-										{application.type === "mysql" && (
-											<MysqlIcon className="h-6 w-6 mr-2" />
-										)}
-										{application.type === "application" && (
-											<GlobeIcon className="h-6 w-6 mr-2" />
-										)}
-										{application.type === "compose" && (
-											<CircuitBoard className="h-6 w-6 mr-2" />
-										)}
-										<span className="grow">
-											{project.name} / {application.environmentName} /{" "}
-											{application.name}{" "}
-											<div style={{ display: "none" }}>{application.id}</div>
-										</span>
-										<div>
-											<StatusTooltip status={application.status} />
-										</div>
-									</CommandItem>
-								));
-							})}
-						</CommandList>
-					</CommandGroup>
-					<CommandSeparator />
-					<CommandGroup heading={"Application"} hidden={true}>
+		<CommandDialog open={open} onOpenChange={setOpen}>
+			<CommandInput
+				placeholder="Search projects and workspace views…"
+				value={search}
+				onValueChange={setSearch}
+			/>
+			<CommandList>
+				<CommandEmpty>No matching project or view.</CommandEmpty>
+				<CommandGroup heading="Projects">
+					{context?.projects.map((project) => (
 						<CommandItem
-							onSelect={() => {
-								router.push("/dashboard/home");
-								setOpen(false);
-							}}
+							key={project.projectId}
+							value={`${project.name} ${project.slug}`}
+							onSelect={() => go(`/${context.workspace.slug}/${project.slug}`)}
+							className="gap-3 py-2.5"
 						>
-							Projects
+							<FolderGit2 className="size-4 text-muted-foreground" />
+							<span className="flex-1 truncate">{project.name}</span>
+							<span className="text-xs text-muted-foreground">/{project.slug}</span>
 						</CommandItem>
+					))}
+				</CommandGroup>
+				<CommandSeparator />
+				<CommandGroup heading="Workspace">
+					{workspaceItems.map((item) => (
 						<CommandItem
-							onSelect={() => {
-								router.push("/dashboard/deployments");
-								setOpen(false);
-							}}
+							key={item.href}
+							onSelect={() => go(item.href)}
+							className="gap-3 py-2.5"
 						>
-							Deployments
+							<item.icon className="size-4 text-muted-foreground" />
+							{item.label}
 						</CommandItem>
-						{!isCloud && (
-							<>
-								<CommandItem
-									onSelect={() => {
-										router.push("/dashboard/monitoring");
-										setOpen(false);
-									}}
-								>
-									Monitoring
-								</CommandItem>
-								<CommandItem
-									onSelect={() => {
-										router.push("/dashboard/traefik");
-										setOpen(false);
-									}}
-								>
-									Traefik
-								</CommandItem>
-								<CommandItem
-									onSelect={() => {
-										router.push("/dashboard/docker");
-										setOpen(false);
-									}}
-								>
-									Docker
-								</CommandItem>
-								<CommandItem
-									onSelect={() => {
-										router.push("/dashboard/requests");
-										setOpen(false);
-									}}
-								>
-									Requests
-								</CommandItem>
-							</>
-						)}
-						<CommandItem
-							onSelect={() => {
-								router.push("/dashboard/settings/server");
-								setOpen(false);
-							}}
-						>
-							Settings
-						</CommandItem>
-					</CommandGroup>
-				</CommandList>
-			</CommandDialog>
-		</div>
+					))}
+				</CommandGroup>
+				<CommandSeparator />
+				<CommandGroup heading="Create">
+					<CommandItem onSelect={() => go("/new")} className="gap-3 py-2.5">
+						<Plus className="size-4 text-[var(--dt-warm)]" /> Import a project
+					</CommandItem>
+				</CommandGroup>
+			</CommandList>
+		</CommandDialog>
 	);
 };

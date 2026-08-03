@@ -15,6 +15,7 @@ import {
 	createRedirect,
 	createRedis,
 	createSecurity,
+	createUniqueProjectSlug,
 	deleteProject,
 	findApplicationById,
 	findComposeById,
@@ -26,9 +27,7 @@ import {
 	findPostgresById,
 	findProjectById,
 	findRedisById,
-	findUserById,
 	findWorkspaceProject,
-	IS_CLOUD,
 	updateProjectById,
 } from "@dokploy/server";
 import { db } from "@dokploy/server/db";
@@ -72,15 +71,6 @@ export const projectRouter = createTRPCRouter({
 		.mutation(async ({ ctx, input }) => {
 			try {
 				await checkProjectAccess(ctx, "create");
-
-				const admin = await findUserById(ctx.user.ownerId);
-
-				if (admin.serversQuantity === 0 && IS_CLOUD) {
-					throw new TRPCError({
-						code: "NOT_FOUND",
-						message: "No servers available, Please subscribe to a plan",
-					});
-				}
 
 				const project = await createProject(
 					input,
@@ -794,8 +784,17 @@ export const projectRouter = createTRPCRouter({
 					await checkPermission(ctx, { projectEnvVars: ["write"] });
 				}
 
-				const project = await updateProjectById(input.projectId, {
-					...input,
+				const { projectId, slug, ...updates } = input;
+				const nextSlug = slug
+					? await createUniqueProjectSlug(
+							ctx.session.activeOrganizationId,
+							slug,
+							projectId,
+						)
+					: undefined;
+				const project = await updateProjectById(projectId, {
+					...updates,
+					...(nextSlug ? { slug: nextSlug } : {}),
 				});
 
 				if (project) {

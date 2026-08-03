@@ -302,21 +302,21 @@ try {
 
 		await legacy.unsafe(`
 			insert into drizzle.__drizzle_migrations (hash, created_at)
-			values ('phase2-unreviewed-head', 1785689568548)
+			values ('phase2-unreviewed-head', 1785709133787)
 		`);
 		let unsupportedHeadBlocked = false;
 		try {
 			await runCutback(legacy);
 		} catch (error) {
 			unsupportedHeadBlocked =
-				error instanceof Error && /supports migration head 0183 only/.test(error.message);
+				error instanceof Error && /supports migration head 0184 only/.test(error.message);
 		}
 		assert(
 			unsupportedHeadBlocked,
 			"SQL cutback did not reject an unreviewed later migration",
 		);
 		await legacy.unsafe(
-			"delete from drizzle.__drizzle_migrations where created_at = 1785689568548",
+			"delete from drizzle.__drizzle_migrations where created_at = 1785709133787",
 		);
 		await legacy.unsafe(
 			`update project set "deletedAt" = now() where "projectId" = 'project_phase2'`,
