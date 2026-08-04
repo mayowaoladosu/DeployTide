@@ -15,6 +15,7 @@ import {
 	getUserByToken,
 } from "../services/admin";
 import { recordActivity } from "../services/activity";
+import { createUniqueWorkspaceSlug } from "../services/product-slugs";
 import {
 	getWebServerSettings,
 	updateWebServerSettings,
@@ -241,11 +242,13 @@ const createBetterAuth = () =>
 						}
 
 						if (IS_CLOUD || !isAdminPresent) {
+							const slug = await createUniqueWorkspaceSlug("My Organization");
 							await db.transaction(async (tx) => {
 								const organization = await tx
 									.insert(schema.organization)
 									.values({
 										name: "My Organization",
+										slug,
 										ownerId: user.id,
 										createdAt: new Date(),
 									})
