@@ -17,6 +17,11 @@ import {
 import { db } from "@dokploy/server/db";
 import { projectSources } from "@dokploy/server/db/schema";
 import {
+	buildRepositoryEvidenceFromGithub,
+	DETECTOR_REGISTRY_VERSION,
+	detectFramework,
+} from "@dokploy/server/frameworks";
+import {
 	addNewEnvironment,
 	addNewProject,
 	addNewService,
@@ -26,6 +31,7 @@ import {
 } from "@dokploy/server/services/permission";
 import { TRPCError } from "@trpc/server";
 import { nanoid } from "nanoid";
+import { Octokit } from "octokit";
 import { z } from "zod";
 import { createTRPCRouter, protectedProcedure } from "@/server/api/trpc";
 import { audit } from "@/server/api/utils/audit";
@@ -145,6 +151,35 @@ const rollbackFailedImport = async (
 	throw cause;
 };
 
+/**
+ * Best-effort framework detection for a repository-mode import. Only public
+ * github.com repositories can be scanned without a connected GitHub App
+ * installation; anything else (private repos, non-GitHub hosts, network or
+ * rate-limit failures) degrades to a null result and the caller falls back
+ * to the application's existing default buildType. This never throws.
+ */
+const detectRepositoryFramework = async (
+	repository: { url: string; owner: string | null; name: string },
+	branch: string,
+) => {
+	try {
+		const url = new URL(repository.url);
+		if (url.hostname !== "github.com" || !repository.owner) return null;
+		const octokit = new Octokit();
+		const evidence = await buildRepositoryEvidenceFromGithub({
+			octokit,
+			owner: repository.owner,
+			repo: repository.name,
+			ref: branch,
+			timeoutMs: 8_000,
+		});
+		if (evidence.files.size === 0) return null;
+		return detectFramework(evidence);
+	} catch {
+		return null;
+	}
+};
+
 export const productRouter = createTRPCRouter({
 	context: protectedProcedure.query(async ({ ctx }) => {
 		const access = await productAccess(ctx);
@@ -240,6 +275,10 @@ export const productRouter = createTRPCRouter({
 				});
 				await addNewService(ctx, application.applicationId);
 
+				const detection = repository
+					? await detectRepositoryFramework(repository, input.branch)
+					: null;
+
 				await updateApplication(application.applicationId, {
 					sourceType: input.mode === "repository" ? "git" : "drop",
 					customGitUrl: repository?.url ?? null,
@@ -247,6 +286,11 @@ export const productRouter = createTRPCRouter({
 					customGitBuildPath: repository ? input.rootDirectory : null,
 					dropBuildPath: input.mode === "upload" ? input.rootDirectory : null,
 					applicationStatus: "idle",
+					...(detection?.buildType ? { buildType: detection.buildType } : {}),
+					...(detection?.startCommand ? { command: detection.startCommand } : {}),
+					...(detection?.buildType === "static" && detection.outputDirectory
+						? { publishDirectory: detection.outputDirectory }
+						: {}),
 				});
 
 				await db.insert(projectSources).values({
@@ -258,6 +302,8 @@ export const productRouter = createTRPCRouter({
 					repositoryId: repository?.url,
 					defaultBranch: repository ? input.branch : "main",
 					rootDirectory: input.rootDirectory,
+					detectorVersion: detection ? DETECTOR_REGISTRY_VERSION : null,
+					detectorResult: detection ? { ...detection } : null,
 					autoDeployPolicy: {
 						enabled: input.mode === "repository",
 						productionBranch: repository ? input.branch : "main",
