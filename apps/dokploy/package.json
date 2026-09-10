@@ -175,7 +175,7 @@
 		"tsx": "^4.22.4",
 		"typescript": "^5.8.3",
 		"vite-tsconfig-paths": "4.3.2",
-		"vitest": "^4.0.18"
+		"vitest": "^4.1.11"
 	},
 	"ct3aMetadata": {
 		"initVersion": "7.25.2"
